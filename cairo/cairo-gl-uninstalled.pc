@@ -1,0 +1,7 @@
+Name: cairo-gl
+Description: OpenGL surface backend for cairo graphics library
+Version: 1.16.0
+
+Requires: cairo gl
+Libs:  
+Cflags: -I${pc_top_builddir}/${pcfiledir}/./src 
