@@ -1,7 +1,0 @@
-Name: cairo-glx
-Description: GLX functions for cairo graphics library
-Version: 1.16.0
-
-Requires: cairo 
-Libs: -lGL 
-Cflags: -I${pc_top_builddir}/${pcfiledir}/./src 
