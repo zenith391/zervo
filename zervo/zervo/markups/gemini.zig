@@ -5,6 +5,7 @@ const std = @import("std");
 const imr = @import("imr.zig");
 const Allocator = std.mem.Allocator;
 const eqlIgnoreCase = std.ascii.eqlIgnoreCase;
+const Url = @import("../url.zig").Url;
 
 const LineType = enum {
     text,
@@ -16,7 +17,7 @@ const LineType = enum {
 /// Note that this method returns tags that depend on slices created from text.
 /// This means you cannot free text unless done with document.
 /// Memory is caller owned.
-pub fn parse(allocator: *Allocator, text: []const u8) !imr.Document {
+pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
     var pos: usize = 0;
     var lineStart: usize = 0;
     var lineType: LineType = .text;
@@ -30,7 +31,7 @@ pub fn parse(allocator: *Allocator, text: []const u8) !imr.Document {
         if (ch == '\n') {
             while (text[lineStart] == ' ') lineStart += 1;
             const line = text[lineStart..pos];
-            std.debug.warn("line: {}, type: {}\n", .{line, lineType});
+            //std.debug.warn("line: {}, type: {}\n", .{line, lineType});
 
             switch (lineType) {
                 .text => {
@@ -73,9 +74,14 @@ pub fn parse(allocator: *Allocator, text: []const u8) !imr.Document {
                         urlEnd = line.len;
                         space = 0;
                     }
+                    const url = line[0..urlEnd];
+                    const href = try root.combine(allocator, url);
+                    //std.debug.warn("root: {}\n", .{root});
+                    //std.debug.warn("link url: {} = {}\n", .{url, href});
                     const tag = imr.Tag {
                         .parent = null,
                         .allocator = allocator,
+                        .href = href,
                         .style = .{
                             .textColor = .{.red = 0x00, .green = 0x00, .blue = 0xFF}
                         },

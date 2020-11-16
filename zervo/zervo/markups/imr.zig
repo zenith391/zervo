@@ -4,6 +4,7 @@
 //! IMR is DOM-based but does not have any textual representation.
 
 const std = @import("std");
+const Url = @import("../url.zig").Url;
 pub const TagList = std.ArrayList(Tag);
 const Real = f32;
 
@@ -50,6 +51,7 @@ pub const Tag = struct {
     parent: ?*Tag,
     allocator: ?*std.mem.Allocator,
     style: Style = .{},
+    href: ?Url = null,
     data: union(TagType) {
         text: [:0]const u8,
         /// List of childrens tags
@@ -57,6 +59,7 @@ pub const Tag = struct {
     },
 
     pub fn deinit(self: *const Tag) void {
+        if (self.href) |href| href.deinit();
         switch (self.data) {
             .text => |text| {
                 if (self.allocator) |allocator| allocator.free(text);

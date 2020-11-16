@@ -41,8 +41,15 @@ pub const CairoBackend = struct {
     cairo: *c.cairo_t,
     surface: *c.cairo_surface_t,
     gl_texture: c.GLuint,
-
     frame_requested: bool,
+    mouseButtonCb: ?fn(backend: *CairoBackend, button: MouseButton, pressed: bool) void = null,
+    userData: usize = 0,
+
+    pub const MouseButton = enum(c_int) {
+        Left = c.GLFW_MOUSE_BUTTON_LEFT,
+        Right = c.GLFW_MOUSE_BUTTON_RIGHT,
+        Middle = c.GLFW_MOUSE_BUTTON_MIDDLE
+    };
 
     export fn windowSizeCallback(window: ?*c.GLFWwindow, width: c_int, height: c_int) void {
         var self = @ptrCast(?*CairoBackend, @alignCast(@alignOf(*CairoBackend), c.glfwGetWindowUserPointer(window))) orelse unreachable;
@@ -51,6 +58,13 @@ pub const CairoBackend = struct {
         self.surface = c.cairo_image_surface_create(c.cairo_format_t.CAIRO_FORMAT_ARGB32, width, height) orelse unreachable;
         self.cairo = c.cairo_create(self.surface) orelse unreachable;
         self.frame_requested = true;
+    }
+
+    export fn mouseButtonCallback(window: ?*c.GLFWwindow, button: c_int, action: c_int, mods: c_int) void {
+        var self = @ptrCast(?*CairoBackend, @alignCast(@alignOf(*CairoBackend), c.glfwGetWindowUserPointer(window))) orelse unreachable;
+        if (self.mouseButtonCb) |callback| {
+            callback(self, @intToEnum(MouseButton, button), action == c.GLFW_PRESS);
+        }
     }
 
     pub fn init() !CairoBackend {
@@ -71,6 +85,7 @@ pub const CairoBackend = struct {
 
         c.glfwMakeContextCurrent(window);
         _ = c.glfwSetFramebufferSizeCallback(window, windowSizeCallback);
+        _ = c.glfwSetMouseButtonCallback(window, mouseButtonCallback);
 
         var vert: [:0]const u8 =
             \\ #version 150
@@ -161,7 +176,6 @@ pub const CairoBackend = struct {
             .frame_requested = true,
             .window = window,
             .gl_texture = tex,
-
             .cairo = cairo,
             .surface = surface
         };
@@ -193,12 +207,28 @@ pub const CairoBackend = struct {
         return c.glfwWindowShouldClose(self.window) != 1;
     }
 
-    pub fn getWidth(self: *CairoBackend) f32 {
-        return @intToFloat(f32, c.cairo_image_surface_get_width(self.surface));
+    pub fn getCursorX(self: *CairoBackend) f64 {
+        var x: f64 = undefined;
+        c.glfwGetCursorPos(self.window, &x, null);
+        return x;
     }
 
-    pub fn getHeight(self: *CairoBackend) f32 {
-        return @intToFloat(f32, c.cairo_image_surface_get_height(self.surface));
+    pub fn getCursorY(self: *CairoBackend) f64 {
+        var y: f64 = undefined;
+        c.glfwGetCursorPos(self.window, null, &y);
+        return y;
+    }
+
+    pub fn isMousePressed(self: *CairoBackend, btn: MouseButton) bool {
+        return c.glfwGetMouseButton(self.window, @enumToInt(btn)) == c.GLFW_PRESS;
+    }
+
+    pub fn getWidth(self: *CairoBackend) f64 {
+        return @intToFloat(f64, c.cairo_image_surface_get_width(self.surface));
+    }
+
+    pub fn getHeight(self: *CairoBackend) f64 {
+        return @intToFloat(f64, c.cairo_image_surface_get_height(self.surface));
     }
 
     pub fn deinit(self: *CairoBackend) void {

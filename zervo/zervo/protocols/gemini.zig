@@ -3,6 +3,7 @@ const ssl = @import("ssl");
 const SSLConnection = ssl.SSLConnection;
 const Address = std.net.Address;
 const Allocator = std.mem.Allocator;
+const Url = @import("../url.zig").Url;
 
 pub const GeminiResponse = struct {
     original: []const u8,
@@ -12,11 +13,6 @@ pub const GeminiResponse = struct {
     pub fn deinit(self: *GeminiResponse) void {
         self.alloc.free(self.original);
     }
-};
-
-pub const GeminiRequest = struct {
-    host: []const u8,
-    path: []const u8,
 };
 
 fn parseResponse(allocator: *Allocator, text: []u8) !GeminiResponse {
@@ -46,16 +42,18 @@ fn syncTcpConnect(address: Address) !std.fs.File {
     return std.fs.File{ .handle = sockfd };
 }
 
-pub fn request(allocator: *Allocator, address: Address, rst: GeminiRequest) !GeminiResponse {
+pub fn request(allocator: *Allocator, address: Address, url: Url) !GeminiResponse {
     var out = std.io.getStdOut().outStream();
     var file = try syncTcpConnect(address);
 
-    const conn = try SSLConnection.init(allocator, file, rst.host, true);
+    const conn = try SSLConnection.init(allocator, file, url.host, true);
     defer conn.deinit();
     const reader = conn.reader();
     const writer = conn.writer();
-    std.debug.warn("gemini://{}{}\r\n", .{rst.host, rst.path});
-    try writer.print("gemini://{}{}\r\n", .{rst.host, rst.path});
+
+    const buf = try std.fmt.allocPrint(allocator, "{}\r\n", .{url});
+    try writer.writeAll(buf); // send it all at once to avoid problems with bugged servers
+    allocator.free(buf);
 
     var result: []u8 = try allocator.alloc(u8, 0);
     var bytes: []u8 = try allocator.alloc(u8, 4096);
@@ -64,9 +62,6 @@ pub fn request(allocator: *Allocator, address: Address, rst: GeminiRequest) !Gem
     var len: usize = 0;
 
     while (true) {
-        // if (std.event.Loop.instance) |loop| {
-        //     loop.yield();
-        // }
         var frame = async reader.read(bytes);
         read = try await frame;
         var start = len;
