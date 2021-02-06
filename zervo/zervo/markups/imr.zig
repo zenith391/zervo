@@ -21,7 +21,7 @@ pub const Color = packed struct {
 };
 
 pub const SizeUnit = union(enum) {
-    /// From 0 to 1
+    /// Percent where 1 is 100%
     Percent: Real,
     Pixels: Real,
     ViewportWidth: Real,
@@ -39,11 +39,17 @@ pub const SizeUnit = union(enum) {
     }
 };
 
+pub const TextSize = union(enum) {
+    Units: Real,
+    Percent: Real,
+};
+
 pub const Style = struct {
     textColor: ?Color = null,
     width: SizeUnit = .Automatic,
     height: SizeUnit = .Automatic,
-    lineHeight: Real = 1.6,
+    lineHeight: Real = 1.2,
+    fontFace: [:0]const u8 = "Nunito",
     fontSize: Real = 16,
 };
 
@@ -52,11 +58,28 @@ pub const Tag = struct {
     allocator: ?*std.mem.Allocator,
     style: Style = .{},
     href: ?Url = null,
+    id: ?[]const u8 = null,
+    layoutX: f64 = 0,
+    layoutY: f64 = 0,
     data: union(TagType) {
         text: [:0]const u8,
         /// List of childrens tags
         container: TagList
     },
+
+    pub fn getElementById(self: *const Tag, id: []const u8) ?*Tag {
+        switch (self.data) {
+            .container => |container| {
+                for (container.items) |*tag| {
+                    if (std.mem.eql(u8, tag.id, id)) return tag;
+                    if (tag.getElementById(id)) |elem| {
+                        return elem;
+                    }
+                }
+            },
+            else => {}
+        }
+    }
 
     pub fn deinit(self: *const Tag) void {
         if (self.href) |href| href.deinit();
@@ -76,6 +99,15 @@ pub const Tag = struct {
 
 pub const Document = struct {
     tags: TagList,
+
+    pub fn getElementById(self: *const Document, id: []const u8) ?*Tag {
+        for (self.tags.items) |*tag| {
+            if (std.mem.eql(u8, tag.id, id)) return tag;
+            if (tag.getElementById(id)) |elem| {
+                return elem;
+            }
+        }
+    }
 
     pub fn deinit(self: *const Document) void {
         for (self.tags.items) |*tag| {

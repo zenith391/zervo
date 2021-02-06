@@ -3,6 +3,7 @@ usingnamespace @cImport({
     @cInclude("GL/gl.h");
     @cInclude("GL/glext.h");
     @cInclude("cairo.h");
+    @cInclude("pango/pangocairo.h");
 });
 
 pub extern fn glGenBuffers(n: GLsizei, buffers: [*c]GLuint) void;

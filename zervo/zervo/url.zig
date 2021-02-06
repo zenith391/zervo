@@ -22,8 +22,11 @@ pub const Url = struct {
         const schemePos = std.mem.indexOf(u8, text, "://") orelse return UrlError.MissingScheme;
         if (schemePos == 0) return UrlError.MissingScheme;
         const scheme = text[0..schemePos];
-        const portPos = std.mem.indexOfPos(u8, text, schemePos+3, ":");
+        var portPos = std.mem.indexOfPos(u8, text, schemePos+3, ":");
         const pathPos = std.mem.indexOfPos(u8, text, schemePos+3, "/") orelse text.len;
+        if (portPos) |pos| {
+            if (pos > pathPos) portPos = null;
+        }
         var port: ?u16 = null;
         if (portPos) |pos| {
             port = std.fmt.parseUnsigned(u16, text[pos+1..pathPos], 10) catch |err| return UrlError.InvalidPort;
@@ -42,13 +45,14 @@ pub const Url = struct {
 
     pub fn combine(self: *const Url, allocator: *Allocator, part: []const u8) !Url {
         if (part.len == 0) return UrlError.EmptyString;
-        if (part[0] == '/') {
+        if (part.len >= 2 and part[0] == '/' and part[1] != '/') {
             return Url {
                 .scheme = try allocator.dupe(u8, self.scheme),
                 .host = try allocator.dupe(u8, self.host),
                 .port = self.port,
                 .path = try allocator.dupe(u8, part),
-                .query = null
+                .query = null,
+                .allocator = allocator,
             };
         } else if (part[0] == '?') {
             return Url {
@@ -59,17 +63,29 @@ pub const Url = struct {
                 .query = try allocator.dupe(u8, part[1..])
             };
         } else {
-            if (std.mem.indexOf(u8, part, "://")) |schemePos| {
+            //std.debug.warn("part = {s}\n", .{part});
+            const nSchemePos = std.mem.indexOf(u8, part, "//");
+            var cond = true;
+            if (std.mem.indexOfScalar(u8, part, '?')) |q| {
+                cond = if (nSchemePos) |pos| pos < q else true;
+            }
+            if (nSchemePos != null and cond) {
+                const schemePos = nSchemePos.?;
                 if (schemePos != 0) {
                     // todo, handle urls like "://example.com/test"
+                    std.log.info("full2: {s}", .{part});
                     return try (try Url.parse(part)).dupe(allocator);
                 } else {
-                    // TODO
-                    unreachable;
+                    const full = try std.fmt.allocPrint(allocator, "{s}:{s}", .{self.scheme, part});
+                    std.log.info("full: {s}", .{full});
+                    defer allocator.free(full);
+                    return try (try Url.parse(full)).dupe(allocator);
                 }
             } else {
                 if (part.len + 1 > Url.MAX_LENGTH) return UrlError.TooLong;
-                const path = try std.fmt.allocPrint(allocator, "/{}", .{part});
+                const lastSlash = std.mem.lastIndexOfScalar(u8, self.path, '/') orelse 0;
+                const path = if (part[0] == '/') try allocator.dupe(u8, part)
+                    else try std.fmt.allocPrint(allocator, "{s}/{s}", .{self.path[0..lastSlash], part});
                 return Url {
                     .scheme = try allocator.dupe(u8, self.scheme),
                     .host = try allocator.dupe(u8, self.host), .port = self.port,
@@ -100,13 +116,13 @@ pub const Url = struct {
     }
 
     pub fn format(self: *const Url, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.print("{}://{}", .{self.scheme, self.host});
+        try writer.print("{s}://{s}", .{self.scheme, self.host});
         if (self.port) |port| {
             try writer.print(":{}", .{port});
         }
         try writer.writeAll(self.path);
         if (self.query) |query| {
-            try writer.print("?{}", .{query});
+            try writer.print("?{s}", .{query});
         }
     }
 };

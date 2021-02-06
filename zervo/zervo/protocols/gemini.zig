@@ -8,6 +8,9 @@ const Url = @import("../url.zig").Url;
 pub const GeminiResponse = struct {
     original: []const u8,
     content: []const u8,
+
+    statusCode: u8,
+    meta: []const u8,
     alloc: *Allocator,
 
     pub fn deinit(self: *GeminiResponse) void {
@@ -15,23 +18,65 @@ pub const GeminiResponse = struct {
     }
 };
 
+pub const GeminiError = error {
+    // invalid response
+    MetaTooLong,
+    MissingStatus,
+    InvalidStatus,
+    /// After receiving this error, the client should prompt the user to input a string
+    /// and retry the request with the inputted string
+    InputRequired,
+};
+
 fn parseResponse(allocator: *Allocator, text: []u8) !GeminiResponse {
     var pos: usize = 0;
     while (true) : (pos += 1) {
         var char = text[pos];
-        if (std.mem.eql(u8, text[pos..(pos+2)], "\r\n")) {
-            pos += 2;
+        if (pos >= text.len-3 or std.mem.eql(u8, text[pos..(pos+2)], "\r\n")) {
             break;
         }
     }
-
-    var resp: GeminiResponse = .{
-        .alloc = allocator,
-        .content = text[pos..],
-        .original = text
+    const header = text[0..pos];
+    var splitIterator = std.mem.split(header, " ");
+    const status = splitIterator.next() orelse return GeminiError.MissingStatus;
+    if (status.len != 2) {
+        std.log.scoped(.gemini).err("Status code has an invalid length: {} != 2", .{status.len});
+        return GeminiError.InvalidStatus;
+    }
+    const statusCode = std.fmt.parseUnsigned(u8, status, 10) catch {
+        std.log.scoped(.gemini).err("Invalid status code (not a number): {s}", .{status});
+        return GeminiError.InvalidStatus;
     };
 
-    return resp;
+    const meta = splitIterator.rest();
+    if (meta.len > 1024) {
+        std.log.scoped(.gemini).warn("Meta string is too long: {} bytes > 1024 bytes", .{meta.len});
+        //return GeminiError.MetaTooLong;
+    }
+
+    if (statusCode >= 10 and statusCode < 20) { // 1x (INPUT)
+        return GeminiError.InputRequired;
+    } else if (statusCode >= 30 and statusCode < 40) { // 3x (REDIRECT)
+        // TODO: redirect
+        std.log.scoped(.gemini).crit("TODO status code: {}", .{statusCode});
+    } else if (statusCode >= 40 and statusCode < 60) { // 4x (TEMPORARY FAILURE) and 5x (PERMANENT FAILURE)
+        // TODO: failures
+        std.log.scoped(.gemini).crit("TODO status code: {}", .{statusCode});
+    } else if (statusCode >= 60 and statusCode < 70) { // 6x (CLIENT CERTIFICATE REQUIRED)
+        // TODO: client certificate
+        std.log.scoped(.gemini).crit("TODO status code: {}", .{statusCode});
+    } else if (statusCode < 20 or statusCode > 29) { // not 2x (SUCCESS)
+        std.log.scoped(.gemini).err("{} is not a valid status code", .{statusCode});
+        return GeminiError.InvalidStatus;
+    }
+
+    return GeminiResponse {
+        .alloc = allocator,
+        .content = text[std.math.min(text.len, pos+2)..],
+        .original = text,
+        .statusCode = statusCode,
+        .meta = meta
+    };
 }
 
 fn syncTcpConnect(address: Address) !std.fs.File {
@@ -43,7 +88,7 @@ fn syncTcpConnect(address: Address) !std.fs.File {
 }
 
 pub fn request(allocator: *Allocator, address: Address, url: Url) !GeminiResponse {
-    var out = std.io.getStdOut().outStream();
+    // TODO: move to Zig's new net I/O
     var file = try syncTcpConnect(address);
 
     const conn = try SSLConnection.init(allocator, file, url.host, true);
@@ -56,13 +101,13 @@ pub fn request(allocator: *Allocator, address: Address, url: Url) !GeminiRespons
     allocator.free(buf);
 
     var result: []u8 = try allocator.alloc(u8, 0);
-    var bytes: []u8 = try allocator.alloc(u8, 4096);
-    defer allocator.free(bytes);
+    errdefer allocator.free(result);
+    var bytes: [1024]u8 = undefined;
     var read: usize = 0;
     var len: usize = 0;
 
     while (true) {
-        var frame = async reader.read(bytes);
+        var frame = async reader.read(&bytes);
         read = try await frame;
         var start = len;
         len += read;
@@ -72,7 +117,6 @@ pub fn request(allocator: *Allocator, address: Address, url: Url) !GeminiRespons
             break;
         }
     }
-    std.debug.warn("response: {}", .{result});
 
     return parseResponse(allocator, result);
 }

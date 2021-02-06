@@ -95,7 +95,6 @@ fn parseResponse(allocator: *Allocator, text: []u8) !HttpResponse {
 }
 
 pub fn request(allocator: *Allocator, address: Address, rst: HttpRequest) !HttpResponse {
-    var out = std.io.getStdOut().outStream();
     var file = try std.net.tcpConnectToAddress(address);
 
     const conn = try SSLConnection.init(allocator, file, rst.host, rst.secure);
@@ -116,7 +115,7 @@ pub fn request(allocator: *Allocator, address: Address, rst: HttpRequest) !HttpR
         try writer.writeAll(": ");
         try writer.writeAll(entry.value.value);
         try writer.writeAll("\r\n");
-        std.debug.warn("{}: {}\n", .{entry.key, entry.value.value});
+        std.debug.warn("{s}: {s}\n", .{entry.key, entry.value.value});
     }
     try writer.writeAll("\r\n");
 
