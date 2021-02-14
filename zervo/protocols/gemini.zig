@@ -40,7 +40,7 @@ fn parseResponse(allocator: *Allocator, text: []u8) !GeminiResponse {
     var splitIterator = std.mem.split(header, " ");
     const status = splitIterator.next() orelse return GeminiError.MissingStatus;
     if (status.len != 2) {
-        std.log.scoped(.gemini).err("Status code has an invalid length: {} != 2", .{status.len});
+        std.log.scoped(.gemini).err("Status code ({s}) has an invalid length: {} != 2", .{status, status.len});
         return GeminiError.InvalidStatus;
     }
     const statusCode = std.fmt.parseUnsigned(u8, status, 10) catch {

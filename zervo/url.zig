@@ -63,7 +63,6 @@ pub const Url = struct {
                 .query = try allocator.dupe(u8, part[1..])
             };
         } else {
-            //std.debug.warn("part = {s}\n", .{part});
             const nSchemePos = std.mem.indexOf(u8, part, "//");
             var cond = true;
             if (std.mem.indexOfScalar(u8, part, '?')) |q| {
@@ -73,11 +72,9 @@ pub const Url = struct {
                 const schemePos = nSchemePos.?;
                 if (schemePos != 0) {
                     // todo, handle urls like "://example.com/test"
-                    std.log.info("full2: {s}", .{part});
                     return try (try Url.parse(part)).dupe(allocator);
                 } else {
                     const full = try std.fmt.allocPrint(allocator, "{s}:{s}", .{self.scheme, part});
-                    std.log.info("full: {s}", .{full});
                     defer allocator.free(full);
                     return try (try Url.parse(full)).dupe(allocator);
                 }

@@ -54,11 +54,12 @@ pub const Style = struct {
 };
 
 pub const Tag = struct {
-    parent: ?*Tag,
+    parent: ?*Tag = null,
     allocator: ?*std.mem.Allocator,
     style: Style = .{},
     href: ?Url = null,
     id: ?[]const u8 = null,
+    elementType: []const u8,
     layoutX: f64 = 0,
     layoutY: f64 = 0,
     data: union(TagType) {

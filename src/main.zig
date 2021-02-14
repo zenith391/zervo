@@ -49,7 +49,7 @@ fn loadGemini(addr: net.Address, url: zervo.Url) !LoadResult {
     var response = try await request;
     defer response.deinit();
 
-    if (response.statusCode != 20) {
+    if (response.statusCode != 20 and false) {
         std.log.err("Request error:\nStatus code: {} {s}", .{response.statusCode, response.meta});
         return zervo.protocols.gemini.GeminiError.InvalidStatus;
     }
@@ -149,9 +149,9 @@ pub fn main() !void {
     defer ssl.deinit();
 
     // Example URLs:
-    //  gemini://gemini.circumlunar.space:1965/
+    //  gemini://gemini.circumlunar.space/
     //  gemini://drewdevault.com/
-    //  gemini://skyjake.fi:1965/lagrange/
+    //  gemini://skyjake.fi/lagrange/
     const url = try zervo.Url.parse("gemini://drewdevault.com/");
 
     const doc: imr.Document = (try loadPage(url)).Document;

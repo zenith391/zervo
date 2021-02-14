@@ -1,4 +1,4 @@
-pub const protocols = @import("zervo/protocols.zig");
-pub const markups = @import("zervo/markups.zig");
-pub const renderer = @import("zervo/renderer.zig");
-pub const Url = @import("zervo/url.zig").Url;
+pub const protocols = @import("protocols.zig");
+pub const markups = @import("markups.zig");
+pub const renderer = @import("renderer.zig");
+pub const Url = @import("url.zig").Url;
