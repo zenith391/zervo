@@ -31,7 +31,6 @@ pub fn RenderContext(comptime T: type) type {
         const Self = @This();
 
         pub fn setup(self: *const Self) void {
-            self.graphics.mouseButtonCb = Self.mouseButtonCallback;
             self.graphics.mouseScrollCb = Self.mouseScrollCallback;
             self.graphics.userData = @ptrToInt(self);
         }
@@ -135,7 +134,7 @@ pub fn RenderContext(comptime T: type) type {
             backend.frame_requested = true;
         }
 
-        fn mouseButtonCallback(backend: *T, button: T.MouseButton, pressed: bool) void {
+        pub fn mouseButtonCallback(backend: *T, button: T.MouseButton, pressed: bool) void {
             const self = @intToPtr(*Self, backend.userData);
             const event = Event {
                 .MouseButton = .{

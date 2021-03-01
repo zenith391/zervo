@@ -21,7 +21,7 @@ const ParserState = union(enum) {
     Heading: usize
 };
 
-inline fn getLineEnd(text: []const u8, pos: usize) usize {
+fn getLineEnd(text: []const u8, pos: usize) usize {
     const newPos = std.mem.indexOfScalarPos(u8, text, pos, '\r') orelse (std.mem.indexOfScalarPos(u8, text, pos, '\n') orelse text.len);
     if (newPos == text.len or text[newPos] == '\r') {
         return newPos;
@@ -32,7 +32,7 @@ inline fn getLineEnd(text: []const u8, pos: usize) usize {
     }
 }
 
-inline fn getNextLine(text: []const u8, pos: usize) usize {
+fn getNextLine(text: []const u8, pos: usize) usize {
     const newPos = std.mem.indexOfScalarPos(u8, text, pos, '\r') orelse (std.mem.indexOfScalarPos(u8, text, pos, '\n') orelse text.len);
     if (newPos == text.len) {
         return newPos;
@@ -45,13 +45,15 @@ inline fn getNextLine(text: []const u8, pos: usize) usize {
     }
 }
 
-/// Parses `text` into an IMR document.
+/// Parses `text` into a document.
 /// Note that this method returns tags that depend on slices created from text.
 /// This means you cannot free text unless done with document.
 /// Memory is caller owned.
 pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
-    var rootChildrens: imr.TagList = imr.TagList.init(allocator);
-    errdefer rootChildrens.deinit();
+    var document = imr.Document {
+        .tags = imr.TagList.init(allocator)
+    };
+    errdefer document.deinit();
 
     var pos: usize = 0;
     var state = ParserState { .Text = {} };
@@ -76,7 +78,7 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                             .text = try allocator.dupeZ(u8, text[pos..end])
                         }
                     };
-                    try rootChildrens.append(tag);
+                    try document.tags.append(tag);
                     pos = getNextLine(text, pos);
                 }
             },
@@ -92,7 +94,7 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                 const href = root.combine(allocator, url) catch |err| blk: {
                     switch (err) {
                         UrlError.TooLong => {
-                            std.log.warn("URL too long: {}", .{url});
+                            std.log.warn("URL too long: {s}", .{url});
                             break :blk root.dupe(allocator) catch |e| return e;
                         },
                         UrlError.EmptyString => {
@@ -114,7 +116,7 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                         .text = try allocator.dupeZ(u8, name)
                     }
                 };
-                try rootChildrens.append(tag);
+                try document.tags.append(tag);
                 pos = getNextLine(text, pos);
                 state = .Text;
             },
@@ -139,7 +141,7 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                             .text = try allocator.dupeZ(u8, text[pos..end])
                         }
                     };
-                    try rootChildrens.append(tag);
+                    try document.tags.append(tag);
                     pos = getNextLine(text, pos);
                     state = .Text;
                 }
@@ -157,14 +159,12 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                         .text = try allocator.dupeZ(u8, text[pos..end])
                     }
                 };
-                try rootChildrens.append(tag);
+                try document.tags.append(tag);
                 pos = getNextLine(text, end);
                 state = .Text;
             }
         }
     }
 
-    return imr.Document {
-        .tags = rootChildrens
-    };
+    return document;
 }

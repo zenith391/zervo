@@ -34,7 +34,7 @@ pub const MimeType = struct {
         self.parameters.deinit();
     }
 
-    pub inline fn getCharset(self: *MimeType) []const u8 {
+    pub fn getCharset(self: *MimeType) []const u8 {
         return self.parameters.get("charset") orelse "utf-8";
     }
 

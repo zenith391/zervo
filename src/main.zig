@@ -17,9 +17,20 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}) {};
 const allocator = &gpa.allocator;
 var currentUrl: ?zervo.Url = null;
 
+var addressBar: [:0]u8 = undefined;
+var addressBarFocused: bool = false;
+
+var renderCtx: RenderContext = undefined;
+
+var errorDir: std.fs.Dir = undefined;
+
 const LoadResult = union(enum) {
     Document: imr.Document,
     Download: []const u8
+};
+
+const LoadErrorDetails = union(enum) {
+    Input: []const u8
 };
 
 fn loadHttp(addr: net.Address, url: zervo.Url) !imr.Document {
@@ -44,9 +55,23 @@ fn loadHttp(addr: net.Address, url: zervo.Url) !imr.Document {
     return doc;
 }
 
-fn loadGemini(addr: net.Address, url: zervo.Url) !LoadResult {
-    var request = async zervo.protocols.gemini.request(allocator, addr, url);
-    var response = try await request;
+fn loadGemini(addr: net.Address, url: zervo.Url, loadErrorDetails: *LoadErrorDetails) !LoadResult {
+    var errorDetails: zervo.protocols.gemini.GeminiErrorDetails = undefined;
+    var response = zervo.protocols.gemini.request(allocator, addr, url, &errorDetails) catch |err| switch (err) {
+        error.KnownError, error.InputRequired => {
+            errorDetails.deinit();
+            switch (errorDetails) {
+                .Input => |input| {
+                    return error.InputRequired;
+                },
+                .PermanentFailure => |failure| {
+                    return error.NotFound;
+                },
+                else => unreachable
+            }
+        },
+        else => return err
+    };
     defer response.deinit();
 
     if (response.statusCode != 20 and false) {
@@ -56,7 +81,6 @@ fn loadGemini(addr: net.Address, url: zervo.Url) !LoadResult {
 
     const mime = response.meta;
     if (try zervo.markups.from_mime(allocator, url, mime, response.content)) |doc| {
-        std.log.info("content: {s}", .{response.content});
         return LoadResult {
             .Document = doc
         };
@@ -68,7 +92,7 @@ fn loadGemini(addr: net.Address, url: zervo.Url) !LoadResult {
 }
 
 fn loadPage(url: zervo.Url) !LoadResult {
-    std.log.info("Loading web page at {} host = {s}", .{url, url.host});
+    std.log.debug("Loading web page at {} host = {s}", .{url, url.host});
 
     var defaultPort: u16 = 80;
     if (std.mem.eql(u8, url.scheme, "gemini")) defaultPort = 1965;
@@ -84,26 +108,35 @@ fn loadPage(url: zervo.Url) !LoadResult {
             addr = list.addrs[i];
         }
     }
-    std.log.info("Resolved address of {s}: {}", .{url.host, addr});
+    std.log.debug("Resolved address of {s}: {}", .{url.host, addr});
 
     if (std.mem.eql(u8, url.scheme, "gemini")) {
-        var loadFrame = async loadGemini(addr, url);
-        return try await loadFrame;
+        var details: LoadErrorDetails = undefined;
+        const doc = try loadGemini(addr, url, &details);
+        return doc;
     } else {
-        std.log.err("cannot load URL with scheme {s}", .{url.scheme});
+        std.log.err("No handler for URL scheme {s}", .{url.scheme});
         return error.UnknownHostName;
     }
 }
 
 fn loadPageChecked(url: zervo.Url) ?LoadResult {
-    const doc = loadPage(url) catch |err| switch (err) {
-        else => {
-            std.log.err("TODO: return an error page for error {s}", .{@errorName(err)});
+    const doc = loadPage(url) catch |err| {
+        const name = @errorName(err);
+        const path = std.mem.concat(allocator, u8, &[_][]const u8 {name, ".gmi"}) catch unreachable;
+        defer allocator.free(path);
+
+        const file = errorDir.openFile(path, .{}) catch |e| {
+            std.log.err("Missing error page for error {s}", .{@errorName(err)});
             if (@errorReturnTrace()) |trace| {
                 std.debug.dumpStackTrace(trace.*);
             }
             return null;
-        }
+        };
+
+        const full = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch unreachable;
+        const errorDoc = zervo.markups.gemini.parse(allocator, url, full) catch unreachable;
+        return LoadResult { .Document = errorDoc };
     };
     return doc;
 }
@@ -117,6 +150,8 @@ fn loadLink(ctx: *RenderContext, url: zervo.Url) !void {
                     u.deinit();
                 }
                 currentUrl = try url.dupe(allocator);
+                allocator.free(addressBar);
+                addressBar = try std.fmt.allocPrintZ(allocator, "{}", .{currentUrl});
                 ctx.document.deinit();
                 ctx.document = doc;
                 ctx.layout();
@@ -141,6 +176,37 @@ fn loadLink(ctx: *RenderContext, url: zervo.Url) !void {
     }
 }
 
+fn keyTyped(backend: *GraphicsBackend, codepoint: u21) void {
+    if (addressBarFocused) {
+        var codepointOut: [4]u8 = undefined;
+        const codepointLength = std.unicode.utf8Encode(codepoint, &codepointOut) catch unreachable;
+        const utf8 = codepointOut[0..codepointLength];
+        const new = std.mem.concat(allocator, u8, &[_][]const u8 {addressBar, utf8}) catch unreachable;
+        const newZ = allocator.dupeZ(u8, new) catch unreachable;
+        defer allocator.free(new);
+        allocator.free(addressBar);
+        addressBar = newZ;
+        backend.frame_requested = true;
+    }
+}
+
+fn mouseButton(backend: *GraphicsBackend, button: GraphicsBackend.MouseButton, pressed: bool) void {
+    const cx = backend.getCursorX();
+    const cy = backend.getCursorY();
+
+    if (cx > 80 and cy > 10 and cx < backend.getWidth() - 10 and cy < 10 + 30) {
+        addressBarFocused = true;
+    } else {
+        addressBarFocused = false;
+    }
+
+    RenderContext.mouseButtonCallback(backend, button, pressed);
+}
+
+fn windowResize(backend: *GraphicsBackend, width: f64, height: f64) void {
+    renderCtx.layout();
+}
+
 // Main function
 pub fn main() !void {
     defer _ = gpa.deinit();
@@ -152,28 +218,37 @@ pub fn main() !void {
     //  gemini://gemini.circumlunar.space/
     //  gemini://drewdevault.com/
     //  gemini://skyjake.fi/lagrange/
-    const url = try zervo.Url.parse("gemini://drewdevault.com/");
+    const url = try zervo.Url.parse("gemini://gemini.circumlunar.space/");
+    addressBar = try std.fmt.allocPrintZ(allocator, "{}", .{url});
+    defer allocator.free(addressBar);
+
+    errorDir = try std.fs.cwd().openDir("res/errors", .{});
+    defer errorDir.close();
 
     const doc: imr.Document = (try loadPage(url)).Document;
+    errdefer doc.deinit();
     currentUrl = url;
     defer currentUrl.?.deinit();
 
     var backend = try GraphicsBackend.init();
 
-    var renderCtx = RenderContext { .graphics = &backend, .document = doc, .linkCallback = loadLink };
+    renderCtx = RenderContext { .graphics = &backend, .document = doc, .linkCallback = loadLink };
     var renderPtr: ?anyframe->void = null;
     defer renderCtx.document.deinit();
 
     renderCtx.setup();
     renderCtx.layout();
     renderCtx.y = 50;
-    var addressBarBuf: [1024]u8 = undefined;
-    var addressBarFocused: bool = false;
+
+    backend.keyTypedCb = keyTyped;
+    backend.mouseButtonCb = mouseButton;
+    backend.windowResizeCb = windowResize;
+
     while (true) {
         if (backend.frame_requested) {
             const g = &backend;
             g.clear();
-            renderCtx.layout(); // TODO: only layout on resize and page changes
+            //renderCtx.layout(); // TODO: only layout on resize and page changes
             renderCtx.render();
 
             g.moveTo(0, 0);
@@ -190,10 +265,21 @@ pub fn main() !void {
                 g.setFontSize(10);
                 g.setTextWrap(null);
                 g.setSourceRGB(1, 1, 1);
-                g.text(try std.fmt.bufPrintZ(&addressBarBuf, "{}", .{currentUrl}));
+                g.text(addressBar);
                 g.stroke();
             }
         }
+
+        const g = &backend;
+        const cx = g.getCursorX();
+        const cy = g.getCursorY();
+
+        if (cx > 80 and cy > 10 and cx < g.getWidth() - 10 and cy < 10 + 30) {
+            g.setCursor(.Text);
+        } else {
+            g.setCursor(.Normal);
+        }
+
         if (!backend.update()) {
             break;
         }

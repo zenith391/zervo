@@ -15,6 +15,87 @@ pub const GeminiResponse = struct {
 
     pub fn deinit(self: *GeminiResponse) void {
         self.alloc.free(self.original);
+        self.alloc.free(self.meta);
+    }
+};
+
+pub const TemporaryFailureEnum = enum {
+    /// 40 TEMPORARY FAILURE
+    Default,
+    /// 41 SERVER UNAVAILABLE
+    ServerUnavailable,
+    /// 42 CGI ERROR
+    CgiError,
+    /// 43 PROXY ERROR
+    ProxyError,
+    /// 44 SLOW DOWN
+    SlowDown
+};
+
+pub const PermanentFailureEnum = enum {
+    /// 50 PERMANENT FAILURE
+    Default,
+    /// 51 NOT FOUND
+    NotFound,
+    /// 52 GONE
+    Gone,
+    /// 53 PROXY REQUEST REFUSED
+    ProxyRequestRefused,
+    /// 59 BAD REQUEST
+    BadRequest
+};
+
+pub const ClientCertificateEnum = enum {
+    /// 60 CLIENT CERTIFICATE REQUIRED
+    Default,
+    /// 61 CERTIFICATE NOT AUTHORISED
+    NotAuthorised,
+    /// 62 CERTIFICATE NOT VALID
+    NotValid
+};
+
+pub const GeminiErrorDetails = union(enum) {
+    /// 1x input
+    Input: struct {
+        sensitive: bool,
+        meta: []const u8,
+        allocator: *Allocator
+    },
+    /// 3x error
+    Redirect: struct {
+        temporary: bool,
+        meta: []const u8,
+        allocator: *Allocator
+    },
+    /// 4x error
+    TemporaryFailure: struct {
+        detail: TemporaryFailureEnum,
+        meta: []const u8,
+        allocator: *Allocator
+    },
+    /// 5x error
+    PermanentFailure: struct {
+        detail: PermanentFailureEnum,
+        meta: []const u8,
+        allocator: *Allocator
+    },
+    /// 6x error
+    ClientCertificateRequired: struct {
+        detail: ClientCertificateEnum,
+        meta: []const u8,
+        allocator: *Allocator
+    },
+
+    pub fn deinit(self: GeminiErrorDetails) void {
+        const info = @typeInfo(GeminiErrorDetails).Union;
+        const tag_type = info.tag_type.?;
+        const active = std.meta.activeTag(self);
+        inline for (info.fields) |field_info| {
+            if (@field(tag_type, field_info.name) == active) {
+                const child = @field(self, field_info.name);
+                child.allocator.free(child.meta);
+            }
+        }
     }
 };
 
@@ -26,17 +107,19 @@ pub const GeminiError = error {
     /// After receiving this error, the client should prompt the user to input a string
     /// and retry the request with the inputted string
     InputRequired,
+    /// The error is a known protocol error and details are in the passed GeminiErrorDetails union.
+    KnownError,
+    /// The response from the server was malformed
+    BadResponse,
 };
 
-fn parseResponse(allocator: *Allocator, text: []u8) !GeminiResponse {
-    var pos: usize = 0;
-    while (true) : (pos += 1) {
-        var char = text[pos];
-        if (pos >= text.len-3 or std.mem.eql(u8, text[pos..(pos+2)], "\r\n")) {
-            break;
-        }
-    }
-    const header = text[0..pos];
+fn parseResponse(allocator: *Allocator, text: []u8, errorDetails: *GeminiErrorDetails) !GeminiResponse {
+    const headerEnd = std.mem.indexOf(u8, text, "\r\n") orelse {
+        std.log.scoped(.gemini).err("Missing \\r\\n in server's response", .{});
+        return GeminiError.BadResponse;
+    };
+    const header = text[0..headerEnd];
+
     var splitIterator = std.mem.split(header, " ");
     const status = splitIterator.next() orelse return GeminiError.MissingStatus;
     if (status.len != 2) {
@@ -48,23 +131,59 @@ fn parseResponse(allocator: *Allocator, text: []u8) !GeminiResponse {
         return GeminiError.InvalidStatus;
     };
 
-    const meta = splitIterator.rest();
+    const meta = try allocator.dupe(u8, splitIterator.rest());
     if (meta.len > 1024) {
         std.log.scoped(.gemini).warn("Meta string is too long: {} bytes > 1024 bytes", .{meta.len});
         //return GeminiError.MetaTooLong;
     }
 
     if (statusCode >= 10 and statusCode < 20) { // 1x (INPUT)
+        errorDetails.* = .{
+            .Input = .{
+                .sensitive = statusCode == 11,
+                .meta = meta,
+                .allocator = allocator
+            }
+        };
         return GeminiError.InputRequired;
     } else if (statusCode >= 30 and statusCode < 40) { // 3x (REDIRECT)
         // TODO: redirect
         std.log.scoped(.gemini).crit("TODO status code: {}", .{statusCode});
-    } else if (statusCode >= 40 and statusCode < 60) { // 4x (TEMPORARY FAILURE) and 5x (PERMANENT FAILURE)
-        // TODO: failures
-        std.log.scoped(.gemini).crit("TODO status code: {}", .{statusCode});
+        return GeminiError.KnownError;
+    } else if (statusCode >= 40 and statusCode < 50) { // 4x (TEMPORARY FAILURE)
+        errorDetails.* = .{
+            .TemporaryFailure = .{
+                .detail = switch (statusCode) {
+                    41 => .ServerUnavailable,
+                    42 => .CgiError,
+                    43 => .ProxyError,
+                    44 => .SlowDown,
+                    else => .Default
+                },
+                .meta = meta,
+                .allocator = allocator
+            }
+        };
+        return GeminiError.KnownError;
+    } else if (statusCode >= 50 and statusCode < 60) { // 5x (PERMANENT FAILURE)
+        errorDetails.* = .{
+            .PermanentFailure = .{
+                .detail = switch (statusCode) {
+                    51 => .NotFound,
+                    52 => .Gone,
+                    53 => .ProxyRequestRefused,
+                    59 => .BadRequest,
+                    else => .Default
+                },
+                .meta = meta,
+                .allocator = allocator
+            }
+        };
+        return GeminiError.KnownError;
     } else if (statusCode >= 60 and statusCode < 70) { // 6x (CLIENT CERTIFICATE REQUIRED)
         // TODO: client certificate
         std.log.scoped(.gemini).crit("TODO status code: {}", .{statusCode});
+        return GeminiError.KnownError;
     } else if (statusCode < 20 or statusCode > 29) { // not 2x (SUCCESS)
         std.log.scoped(.gemini).err("{} is not a valid status code", .{statusCode});
         return GeminiError.InvalidStatus;
@@ -72,7 +191,7 @@ fn parseResponse(allocator: *Allocator, text: []u8) !GeminiResponse {
 
     return GeminiResponse {
         .alloc = allocator,
-        .content = text[std.math.min(text.len, pos+2)..],
+        .content = text[std.math.min(text.len, headerEnd)..],
         .original = text,
         .statusCode = statusCode,
         .meta = meta
@@ -87,7 +206,7 @@ fn syncTcpConnect(address: Address) !std.fs.File {
     return std.fs.File{ .handle = sockfd };
 }
 
-pub fn request(allocator: *Allocator, address: Address, url: Url) !GeminiResponse {
+pub fn request(allocator: *Allocator, address: Address, url: Url, errorDetails: *GeminiErrorDetails) !GeminiResponse {
     // TODO: move to Zig's new net I/O
     var file = try syncTcpConnect(address);
 
@@ -118,5 +237,5 @@ pub fn request(allocator: *Allocator, address: Address, url: Url) !GeminiRespons
         }
     }
 
-    return parseResponse(allocator, result);
+    return parseResponse(allocator, result, errorDetails);
 }

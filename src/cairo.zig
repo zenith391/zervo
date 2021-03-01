@@ -2,7 +2,7 @@
 const c = @import("c.zig");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const warn = std.debug.warn;
+const log = std.log.scoped(.glfw);
 
 pub const WindowError = error {
     InitializationError
@@ -13,12 +13,12 @@ fn checkError(shader: c.GLuint) void {
     c.glGetShaderiv(shader, c.GL_COMPILE_STATUS, &status);
 
     if (status != c.GL_TRUE) {
-        warn("uncorrect shader:\n", .{});
+        log.warn("uncorrect shader:\n", .{});
         var buf: [512]u8 = undefined;
         var totalLen: c.GLsizei = undefined;
         c.glGetShaderInfoLog(shader, 512, &totalLen, buf[0..]);
         var totalSize: usize = @bitCast(u32, totalLen);
-        warn("{s}\n", .{buf[0..totalSize]});
+        log.warn("{s}\n", .{buf[0..totalSize]});
     }
 }
 
@@ -36,16 +36,24 @@ pub const TextMetrics = struct {
     height: f64
 };
 
+pub const Cursor = enum {
+    Normal,
+    Text
+};
+
 pub const CairoBackend = struct {
     window: *c.GLFWwindow,
     cairo: *c.cairo_t,
     surface: *c.cairo_surface_t,
     gl_texture: c.GLuint,
     frame_requested: bool,
+    previousCursor: Cursor = .Normal,
     /// For animation
     request_next_frame: bool = false,
     mouseButtonCb: ?fn(backend: *CairoBackend, button: MouseButton, pressed: bool) void = null,
     mouseScrollCb: ?fn(backend: *CairoBackend, yOffset: f64) void = null,
+    keyTypedCb: ?fn(backend: *CairoBackend, codepoint: u21) void = null,
+    windowResizeCb: ?fn(backend: *CairoBackend, width: f64, height: f64) void = null,
     userData: usize = 0,
     currentFontDesc: ?*c.PangoFontDescription = null,
     currentFont: *c.PangoFont = undefined,
@@ -65,6 +73,9 @@ pub const CairoBackend = struct {
         self.surface = c.cairo_image_surface_create(c.cairo_format_t.CAIRO_FORMAT_ARGB32, width, height) orelse unreachable;
         self.cairo = c.cairo_create(self.surface) orelse unreachable;
         self.frame_requested = true;
+        if (self.windowResizeCb) |callback| {
+            callback(self, @intToFloat(f64, width), @intToFloat(f64, height));
+        }
     }
 
     export fn mouseButtonCallback(window: ?*c.GLFWwindow, button: c_int, action: c_int, mods: c_int) void {
@@ -81,9 +92,16 @@ pub const CairoBackend = struct {
         }
     }
 
+    export fn characterCallback(window: ?*c.GLFWwindow, codepoint: c_uint) void {
+        var self = @ptrCast(?*CairoBackend, @alignCast(@alignOf(*CairoBackend), c.glfwGetWindowUserPointer(window))) orelse unreachable;
+        if (self.keyTypedCb) |callback| {
+            callback(self, @intCast(u21, codepoint));
+        }
+    }
+
     pub fn init() !CairoBackend {
         if (c.glfwInit() != 1) {
-            warn("Could not init GLFW!\n", .{});
+            log.err("Could not init GLFW!\n", .{});
             return WindowError.InitializationError;
         }
         errdefer c.glfwTerminate();
@@ -101,6 +119,7 @@ pub const CairoBackend = struct {
         _ = c.glfwSetFramebufferSizeCallback(window, windowSizeCallback);
         _ = c.glfwSetMouseButtonCallback(window, mouseButtonCallback);
         _ = c.glfwSetScrollCallback(window, mouseScrollCallback);
+        _ = c.glfwSetCharCallback(window, characterCallback);
 
         var vert: [:0]const u8 =
             \\ #version 150
@@ -240,6 +259,22 @@ pub const CairoBackend = struct {
         return y;
     }
 
+    pub fn setCursor(self: *CairoBackend, cursor: Cursor) void {
+        if (cursor == self.previousCursor) return;
+        if (cursor == .Normal) {
+            c.glfwSetCursor(self.window, null);
+        } else {
+            const cursorType: c_int = switch (cursor) {
+                .Text => c.GLFW_IBEAM_CURSOR,
+                .Normal => unreachable
+            };
+            const glfwCursor = c.glfwCreateStandardCursor(cursorType);
+            c.glfwSetCursor(self.window, glfwCursor);
+            //c.glfwDestroyCursor(glfwCursor);
+        }
+        self.previousCursor = cursor;
+    }
+
     pub fn isMousePressed(self: *CairoBackend, btn: MouseButton) bool {
         return c.glfwGetMouseButton(self.window, @enumToInt(btn)) == c.GLFW_PRESS;
     }
@@ -259,19 +294,19 @@ pub const CairoBackend = struct {
     }
 
     // Draw functions
-    pub inline fn fill(self: *CairoBackend) void {
+    pub fn fill(self: *CairoBackend) void {
         c.cairo_fill(self.cairo);
     }
 
-    pub inline fn stroke(self: *CairoBackend) void {
+    pub fn stroke(self: *CairoBackend) void {
         c.cairo_stroke(self.cairo);
     }
 
-    pub inline fn setSourceRGB(self: *CairoBackend, r: f64, g: f64, b: f64) void {
+    pub fn setSourceRGB(self: *CairoBackend, r: f64, g: f64, b: f64) void {
         c.cairo_set_source_rgb(self.cairo, r, g, b);
     }
 
-    pub inline fn setSourceRGBA(self: *CairoBackend, r: f64, g: f64, b: f64, a: f64) void {
+    pub fn setSourceRGBA(self: *CairoBackend, r: f64, g: f64, b: f64, a: f64) void {
         c.cairo_set_source_rgba(self.cairo, r, g, b, a);
     }
 
