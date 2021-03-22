@@ -6,7 +6,7 @@
 const std = @import("std");
 const Url = @import("../url.zig").Url;
 pub const TagList = std.ArrayList(Tag);
-const Real = f32;
+const Real = f64;
 
 pub const TagType = enum {
     container,
@@ -28,8 +28,10 @@ pub const SizeUnit = union(enum) {
     ViewportHeight: Real,
     Automatic: void,
 
-    pub fn get(self: *SizeUnit, vw: Real, vh: Real) ?Real {
-        return switch (self) {
+    pub const Zero = SizeUnit { .Pixels = 0 };
+
+    pub fn get(self: *const SizeUnit, vw: Real, vh: Real) ?Real {
+        return switch (self.*) {
             .Pixels => |pixels| pixels,
             .Percent => |percent| unreachable, // TODO
             .ViewportWidth => |vW| vw*vW,
@@ -44,10 +46,18 @@ pub const TextSize = union(enum) {
     Percent: Real,
 };
 
+pub const Rectangle = struct {
+    x:      SizeUnit = SizeUnit.Zero,
+    y:      SizeUnit = SizeUnit.Zero,
+    width:  SizeUnit = SizeUnit.Zero,
+    height: SizeUnit = SizeUnit.Zero
+};
+
 pub const Style = struct {
     textColor: ?Color = null,
     width: SizeUnit = .Automatic,
     height: SizeUnit = .Automatic,
+    margin: Rectangle = .{},
     lineHeight: Real = 1.2,
     fontFace: [:0]const u8 = "Nunito",
     fontSize: Real = 16,

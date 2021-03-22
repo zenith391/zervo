@@ -16,6 +16,7 @@ const Event = union(enum) {
 pub fn RenderContext(comptime T: type) type {
     return struct {
         /// Instance of type T.
+        allocator: *Allocator,
         graphics: *T,
         document: Document,
         width: f64 = 0,
@@ -26,8 +27,9 @@ pub fn RenderContext(comptime T: type) type {
         // Component position to use if drawing on the same surface as the render context
         x: f64 = 0,
         y: f64 = 0,
+        linkCallback: ?fn(ctx: *Self, url: Url) callconv(CallbackCallConv) anyerror!void = null,
 
-        linkCallback: ?fn(ctx: *Self, url: Url) anyerror!void = null,
+        pub const CallbackCallConv: std.builtin.CallingConvention = if (std.io.is_async) .Async else .Unspecified;
         const Self = @This();
 
         pub fn setup(self: *const Self) void {
@@ -45,14 +47,17 @@ pub fn RenderContext(comptime T: type) type {
         fn layoutTag(self: *Self, tag: *Tag, y: *f64) void {
             const style = tag.style;
             const g = self.graphics;
+            const margin = style.margin;
             switch (tag.data) {
                 .text => |text| {
                     g.setFontFace(style.fontFace);
                     g.setFontSize(style.fontSize);
                     g.setTextWrap(g.getWidth());
                     const metrics = g.getTextMetrics(text);
+                    tag.layoutX = margin.x.get(self.width, self.height) orelse 0;
+                    y.* += margin.y.get(self.width, self.height) orelse 0;
                     tag.layoutY = y.*;
-                    y.* += metrics.height;
+                    y.* += metrics.height + (margin.height.get(self.width, self.height) orelse 0);
                 },
                 .container => |childrens| {
                     for (childrens.items) |*child| {
@@ -76,21 +81,21 @@ pub fn RenderContext(comptime T: type) type {
         pub fn render(self: *Self) void {
             self.width = self.graphics.getWidth();
             self.height = self.graphics.getHeight();
+
+            // Smooth scrolling
             if (!std.math.approxEqAbs(f64, self.offsetY, self.offsetYTarget, 0.01)) {
                 self.offsetY = lerp(self.offsetY, self.offsetYTarget, 0.4);
                 self.graphics.request_next_frame = true;
             }
+
             for (self.document.tags.items) |tag| {
-                // if (std.event.Loop.instance) |loop| {
-                //     loop.yield();
-                // }
                 if (self.renderTag(tag) catch unreachable) break;
             }
         }
 
-        fn renderText(self: *const Self, tag: Tag, text: [:0]const u8, y: f64) void {
+        fn renderText(self: *const Self, tag: Tag, text: [:0]const u8) void {
             const g = self.graphics;
-            g.moveTo(0, y + self.offsetY + self.y);
+            g.moveTo(tag.layoutX, tag.layoutY + self.offsetY + self.y);
             g.text(text);
             g.stroke();
         }
@@ -102,7 +107,7 @@ pub fn RenderContext(comptime T: type) type {
                 .text => |text| {
                     g.setFontFace(style.fontFace);
                     g.setFontSize(style.fontSize);
-                    g.setTextWrap(self.width);
+                    g.setTextWrap(self.width - tag.layoutX);
                     const metrics = g.getTextMetrics(text);
                     const y = tag.layoutY;
                     if (y > self.height-self.offsetY) {
@@ -114,7 +119,7 @@ pub fn RenderContext(comptime T: type) type {
                         } else {
                             g.setSourceRGB(0, 0, 0);
                         }
-                        self.renderText(tag, text, y);
+                        self.renderText(tag, text);
                     }
                 },
                 .container => |childrens| {
@@ -165,6 +170,7 @@ pub fn RenderContext(comptime T: type) type {
                     g.setFontSize(style.fontSize);
                     g.setTextWrap(self.width);
                     const metrics = g.getTextMetrics(text);
+                    const x = tag.layoutX;
                     const y = tag.layoutY;
 
                     switch (event.*) {
@@ -172,9 +178,19 @@ pub fn RenderContext(comptime T: type) type {
                             if (tag.href) |href| {
                                 const cx = evt.x;
                                 const cy = evt.y;
-                                if (!evt.pressed and cx > 0 and cx <= 0 + metrics.width and cy > y and cy <= y + metrics.height) {
-                                    if (self.linkCallback) |cb| {
-                                        try cb(self, href);
+                                if (!evt.pressed and cx > x and cx <= x + metrics.width and cy > y and cy <= y + metrics.height) {
+                                    if (self.linkCallback) |callback| {
+                                        if (std.io.is_async) {
+                                            const frameSize = @frameSize(callback); // Get the size of the callback's frame
+                                            var frame = try self.allocator.alignedAlloc(u8, 16, frameSize); // Allocate a 16-byte aligned frame
+                                            defer self.allocator.free(frame);
+
+                                            var result: anyerror!void = undefined;
+                                            var f = @asyncCall(frame, &result, callback, .{self, href});
+                                            try await f;
+                                        } else {
+                                            try callback(self, href);
+                                        }
                                         g.*.frame_requested = true;
                                         return true;
                                     }
@@ -185,7 +201,17 @@ pub fn RenderContext(comptime T: type) type {
                 },
                 .container => |childrens| {
                     for (childrens.items) |child| {
-                        if (try self.processTag(child, event)) return true;
+                        if (std.io.is_async) {
+                            const frameSize = @frameSize(processTag);
+                            var frame = try self.allocator.alignedAlloc(u8, 16, frameSize);
+                            defer self.allocator.free(frame);
+
+                            var result: anyerror!bool = undefined;
+                            var f = @asyncCall(frame, &result, processTag, .{self, child, event});
+                            if (try await f) return true;
+                        } else {
+                            if (try self.processTag(child, event)) return true;
+                        }
                     }
                 }
             }

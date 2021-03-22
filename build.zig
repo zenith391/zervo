@@ -31,7 +31,7 @@ pub fn build(b: *Builder) void {
     exe.linkSystemLibrary("c");
 
     // cairo module
-    exe.addIncludeDir("./cairo/src");
+    //exe.addIncludeDir("./cairo/src");
     exe.linkSystemLibrary("cairo");
     exe.linkSystemLibrary("pango");
     exe.linkSystemLibrary("pangocairo");

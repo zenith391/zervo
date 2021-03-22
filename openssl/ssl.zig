@@ -1,5 +1,5 @@
 const std = @import("std");
-const File = std.fs.File;
+const Stream = std.net.Stream;
 const Allocator = std.mem.Allocator;
 
 const c = @cImport({
@@ -64,12 +64,12 @@ pub fn deinit() void {
 pub const SSLConnection = struct {
     ctx: *c.SSL_CTX,
     ssl: *c.SSL,
-    file: ?File,
+    stream: ?Stream,
 
     pub const Reader = std.io.Reader(*const SSLConnection, anyerror, read);
     pub const Writer = std.io.Writer(*const SSLConnection, anyerror, write);
 
-    pub fn init(allocator: *Allocator, file: File, host: []const u8, secure: bool) !SSLConnection {
+    pub fn init(allocator: *Allocator, stream: Stream, host: []const u8, secure: bool) !SSLConnection {
         var ctx: *c.SSL_CTX = undefined;
         var ssl: *c.SSL = undefined;
 
@@ -77,6 +77,7 @@ pub const SSLConnection = struct {
             const method = c.TLS_client_method();
             ctx = c.SSL_CTX_new(method) orelse return error.ConnectionError;
             errdefer c.SSL_CTX_free(ctx);
+            _ = c.SSL_CTX_set_mode(ctx, c.SSL_MODE_AUTO_RETRY | c.SSL_MODE_ENABLE_PARTIAL_WRITE);
 
             ssl = c.SSL_new(ctx) orelse return error.ConnectionError;
 
@@ -88,27 +89,34 @@ pub const SSLConnection = struct {
                 return error.ConnectionError;
             }
 
-            if (c.SSL_set_fd(ssl, file.handle) != 1) {
+            if (c.SSL_set_fd(ssl, stream.handle) != 1) {
                 print_errors();
                 return error.ConnectionError;
             }
 
-            const result = c.SSL_connect(ssl);
-            if (result != 1) {
-                std.debug.warn("error: {}\n", .{result});
-                if (result < 0) {
-                    const err = c.SSL_get_error(ssl, result);
-                    print_ssl_error(err);
+            accept: while (true) {
+                const result = c.SSL_connect(ssl);
+                if (result != 1) {
+                    if (result < 0) {
+                        const err = c.SSL_get_error(ssl, result);
+                        if (err == c.SSL_ERROR_WANT_READ) {
+                            var pollfds = [1]std.os.pollfd { .{ .fd=stream.handle, .events=std.os.POLLIN, .revents=0 } };
+                            _ = try std.os.poll(&pollfds, 1000);
+                            continue :accept;
+                        }
+                        print_ssl_error(err);
+                    }
+                    print_errors();
+                    return SSLError.ConnectionError;
                 }
-                print_errors();
-                return error.ConnectionError;
+                break;
             }
         }
 
         return SSLConnection {
             .ctx = ctx,
             .ssl = ssl,
-            .file = if (secure) null else file
+            .stream = stream
         };
     }
 
@@ -124,10 +132,7 @@ pub const SSLConnection = struct {
         };
     }
 
-    pub fn read(self: *const SSLConnection, data: []u8) !usize {
-        if (self.file) |file| {
-            return try file.read(data);
-        }
+    pub fn read(self: *const SSLConnection, data: []u8) anyerror!usize {
         var readed: usize = undefined;
         const result = c.SSL_read_ex(self.ssl, data.ptr, data.len, &readed);
         if (result == 1) {
@@ -136,26 +141,34 @@ pub const SSLConnection = struct {
             const err = c.SSL_get_error(self.ssl, result);
             if (err == c.SSL_ERROR_ZERO_RETURN or err == c.SSL_ERROR_SYSCALL) { // connection closed
                 return 0;
+            } else if (err == c.SSL_ERROR_WANT_READ or err == c.SSL_ERROR_WANT_WRITE) {
+                var pollfds = [1]std.os.pollfd { .{ .fd=self.stream.?.handle, .events=std.os.POLLIN, .revents=0 } };
+                _ = try std.os.poll(&pollfds, 1000);
+                return try self.read(data);
             }
             print_ssl_error(err);
+            return SSLError.ConnectionError;
         }
         return 0;
     }
 
-    pub fn write(self: *const SSLConnection, data: []const u8) !usize {
-        if (self.file) |file| {
-            return try file.write(data);
-        }
+    pub fn write(self: *const SSLConnection, data: []const u8) anyerror!usize {
         var written: usize = undefined;
         const result = c.SSL_write_ex(self.ssl, data.ptr, data.len, &written);
         if (result == 0) {
-            print_ssl_error(c.SSL_get_error(self.ssl, result));
-            return 0;
+            const err = c.SSL_get_error(self.ssl, result);
+            if (err == c.SSL_ERROR_WANT_READ or err == c.SSL_ERROR_WANT_WRITE) {
+                var pollfds = [1]std.os.pollfd { .{ .fd=self.stream.?.handle, .events=std.os.POLLIN, .revents=0 } };
+                _ = try std.os.poll(&pollfds, 1000);
+                return try self.write(data);
+            }
+            print_ssl_error(err);
+            return SSLError.ConnectionError;
         }
         return @intCast(usize, written);
     }
 
     pub fn deinit(self: *const SSLConnection) void {
-        if (self.file == null) c.SSL_CTX_free(self.ctx);
+        if (self.stream == null) c.SSL_CTX_free(self.ctx);
     }
 };

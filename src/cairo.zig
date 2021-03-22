@@ -53,12 +53,16 @@ pub const CairoBackend = struct {
     mouseButtonCb: ?fn(backend: *CairoBackend, button: MouseButton, pressed: bool) void = null,
     mouseScrollCb: ?fn(backend: *CairoBackend, yOffset: f64) void = null,
     keyTypedCb: ?fn(backend: *CairoBackend, codepoint: u21) void = null,
+    keyPressedCb: ?fn(backend: *CairoBackend, key: u32, mods: u32) void = null,
     windowResizeCb: ?fn(backend: *CairoBackend, width: f64, height: f64) void = null,
     userData: usize = 0,
     currentFontDesc: ?*c.PangoFontDescription = null,
     currentFont: *c.PangoFont = undefined,
     textLayout: *c.PangoLayout = undefined,
     textContext: *c.PangoContext,
+
+    pub const BackspaceKey = c.GLFW_KEY_BACKSPACE;
+    pub const EnterKey = c.GLFW_KEY_ENTER;
 
     pub const MouseButton = enum(c_int) {
         Left = c.GLFW_MOUSE_BUTTON_LEFT,
@@ -76,6 +80,18 @@ pub const CairoBackend = struct {
         if (self.windowResizeCb) |callback| {
             callback(self, @intToFloat(f64, width), @intToFloat(f64, height));
         }
+
+        // var w: c_int = 0;
+        // var h: c_int = 0;
+        // c.glfwGetFramebufferSize(self.window, &w, &h);
+        // c.glViewport(0, 0, w, h);
+        // c.cairo_surface_flush(self.surface);
+        // var data = c.cairo_image_surface_get_data(self.surface);
+        // c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_RGB,
+        //     c.cairo_image_surface_get_width(self.surface),
+        //     c.cairo_image_surface_get_height(self.surface), 0, c.GL_RGBA, c.GL_UNSIGNED_BYTE, data);
+        // c.glDrawElements(c.GL_TRIANGLES, 6, c.GL_UNSIGNED_INT, null);
+        // c.glfwSwapBuffers(self.window);
     }
 
     export fn mouseButtonCallback(window: ?*c.GLFWwindow, button: c_int, action: c_int, mods: c_int) void {
@@ -96,6 +112,15 @@ pub const CairoBackend = struct {
         var self = @ptrCast(?*CairoBackend, @alignCast(@alignOf(*CairoBackend), c.glfwGetWindowUserPointer(window))) orelse unreachable;
         if (self.keyTypedCb) |callback| {
             callback(self, @intCast(u21, codepoint));
+        }
+    }
+
+    export fn keyCallback(window: ?*c.GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) void {
+        var self = @ptrCast(?*CairoBackend, @alignCast(@alignOf(*CairoBackend), c.glfwGetWindowUserPointer(window))) orelse unreachable;
+        if (action == c.GLFW_PRESS or action == c.GLFW_REPEAT) {
+            if (self.keyPressedCb) |callback| {
+                callback(self, @bitCast(u32, key), @bitCast(u32, mods));
+            }
         }
     }
 
@@ -120,6 +145,7 @@ pub const CairoBackend = struct {
         _ = c.glfwSetMouseButtonCallback(window, mouseButtonCallback);
         _ = c.glfwSetScrollCallback(window, mouseScrollCallback);
         _ = c.glfwSetCharCallback(window, characterCallback);
+        _ = c.glfwSetKeyCallback(window, keyCallback);
 
         var vert: [:0]const u8 =
             \\ #version 150

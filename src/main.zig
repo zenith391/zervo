@@ -11,7 +11,7 @@ const Allocator = std.mem.Allocator;
 
 //pub const io_mode = .evented;
 
-const DISABLE_IPV4 = true;
+const DISABLE_IPV6 = false;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}) {};
 const allocator = &gpa.allocator;
@@ -22,7 +22,7 @@ var addressBarFocused: bool = false;
 
 var renderCtx: RenderContext = undefined;
 
-var errorDir: std.fs.Dir = undefined;
+var firstLoad: bool = true;
 
 const LoadResult = union(enum) {
     Document: imr.Document,
@@ -102,7 +102,7 @@ fn loadPage(url: zervo.Url) !LoadResult {
     defer list.deinit();
     if (list.addrs.len == 0) return error.UnknownHostName;
     var addr = list.addrs[0];
-    if (DISABLE_IPV4) {
+    if (DISABLE_IPV6) {
         var i: u32 = 1;
         while (addr.any.family == os.AF_INET6) : (i += 1) {
             addr = list.addrs[i];
@@ -116,17 +116,17 @@ fn loadPage(url: zervo.Url) !LoadResult {
         return doc;
     } else {
         std.log.err("No handler for URL scheme {s}", .{url.scheme});
-        return error.UnknownHostName;
+        return error.UnhandledUrlScheme;
     }
 }
 
 fn loadPageChecked(url: zervo.Url) ?LoadResult {
     const doc = loadPage(url) catch |err| {
         const name = @errorName(err);
-        const path = std.mem.concat(allocator, u8, &[_][]const u8 {name, ".gmi"}) catch unreachable;
+        const path = std.mem.concat(allocator, u8, &[_][]const u8 {"res/errors/", name, ".gmi"}) catch unreachable;
         defer allocator.free(path);
 
-        const file = errorDir.openFile(path, .{}) catch |e| {
+        const file = std.fs.cwd().openFile(path, .{}) catch |e| {
             std.log.err("Missing error page for error {s}", .{@errorName(err)});
             if (@errorReturnTrace()) |trace| {
                 std.debug.dumpStackTrace(trace.*);
@@ -142,7 +142,7 @@ fn loadPageChecked(url: zervo.Url) ?LoadResult {
 }
 
 // Handlers
-fn loadLink(ctx: *RenderContext, url: zervo.Url) !void {
+fn openPage(ctx: *RenderContext, url: zervo.Url) !void {
     if (loadPageChecked(url)) |result| {
         switch (result) {
             .Document => |doc| {
@@ -150,13 +150,14 @@ fn loadLink(ctx: *RenderContext, url: zervo.Url) !void {
                     u.deinit();
                 }
                 currentUrl = try url.dupe(allocator);
-                allocator.free(addressBar);
+                if (!firstLoad) allocator.free(addressBar);
                 addressBar = try std.fmt.allocPrintZ(allocator, "{}", .{currentUrl});
-                ctx.document.deinit();
+                if (!firstLoad) ctx.document.deinit();
                 ctx.document = doc;
                 ctx.layout();
                 ctx.offsetY = 0;
                 ctx.offsetYTarget = 0;
+                firstLoad = false;
             },
             .Download => |content| {
                 defer allocator.free(content);
@@ -172,6 +173,28 @@ fn loadLink(ctx: *RenderContext, url: zervo.Url) !void {
                 defer xdg.deinit();
                 _ = try xdg.spawnAndWait();
             }
+        }
+    }
+}
+
+fn keyPressed(backend: *GraphicsBackend, key: u32, mods: u32) void {
+    if (addressBarFocused) {
+        if (key == GraphicsBackend.BackspaceKey) {
+            if (addressBar.len > 0) {
+                const len = addressBar.len;
+                addressBar[len-1] = 0;
+                addressBar = allocator.shrink(addressBar, len)[0..len-1 :0];
+                backend.frame_requested = true;
+            }
+        } else if (key == GraphicsBackend.EnterKey) {
+            const url = zervo.Url.parse(addressBar) catch |err| switch (err) {
+                else => {
+                    std.log.warn("invalid url", .{});
+                    return;
+                }
+            };
+            openPage(&renderCtx, url) catch unreachable;
+            backend.frame_requested = true;
         }
     }
 }
@@ -211,6 +234,7 @@ fn windowResize(backend: *GraphicsBackend, width: f64, height: f64) void {
 pub fn main() !void {
     defer _ = gpa.deinit();
 
+    // Initialize OpenSSL.
     try ssl.init();
     defer ssl.deinit();
 
@@ -219,28 +243,20 @@ pub fn main() !void {
     //  gemini://drewdevault.com/
     //  gemini://skyjake.fi/lagrange/
     const url = try zervo.Url.parse("gemini://gemini.circumlunar.space/");
-    addressBar = try std.fmt.allocPrintZ(allocator, "{}", .{url});
-    defer allocator.free(addressBar);
-
-    errorDir = try std.fs.cwd().openDir("res/errors", .{});
-    defer errorDir.close();
-
-    const doc: imr.Document = (try loadPage(url)).Document;
-    errdefer doc.deinit();
-    currentUrl = url;
-    defer currentUrl.?.deinit();
 
     var backend = try GraphicsBackend.init();
-
-    renderCtx = RenderContext { .graphics = &backend, .document = doc, .linkCallback = loadLink };
-    var renderPtr: ?anyframe->void = null;
-    defer renderCtx.document.deinit();
+    renderCtx = RenderContext { .graphics = &backend, .document = undefined, .linkCallback = openPage, .allocator = allocator };
 
     renderCtx.setup();
-    renderCtx.layout();
     renderCtx.y = 50;
 
+    try openPage(&renderCtx, url);
+    defer renderCtx.document.deinit();
+    defer allocator.free(addressBar);
+    defer currentUrl.?.deinit();
+
     backend.keyTypedCb = keyTyped;
+    backend.keyPressedCb = keyPressed;
     backend.mouseButtonCb = mouseButton;
     backend.windowResizeCb = windowResize;
 
@@ -248,7 +264,6 @@ pub fn main() !void {
         if (backend.frame_requested) {
             const g = &backend;
             g.clear();
-            //renderCtx.layout(); // TODO: only layout on resize and page changes
             renderCtx.render();
 
             g.moveTo(0, 0);

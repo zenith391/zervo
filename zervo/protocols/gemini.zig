@@ -102,8 +102,6 @@ pub const GeminiErrorDetails = union(enum) {
 pub const GeminiError = error {
     // invalid response
     MetaTooLong,
-    MissingStatus,
-    InvalidStatus,
     /// After receiving this error, the client should prompt the user to input a string
     /// and retry the request with the inputted string
     InputRequired,
@@ -111,9 +109,11 @@ pub const GeminiError = error {
     KnownError,
     /// The response from the server was malformed
     BadResponse,
+    MissingStatus,
+    InvalidStatus,
 };
 
-fn parseResponse(allocator: *Allocator, text: []u8, errorDetails: *GeminiErrorDetails) !GeminiResponse {
+fn parseResponse(allocator: *Allocator, text: []const u8, errorDetails: *GeminiErrorDetails) !GeminiResponse {
     const headerEnd = std.mem.indexOf(u8, text, "\r\n") orelse {
         std.log.scoped(.gemini).err("Missing \\r\\n in server's response", .{});
         return GeminiError.BadResponse;
@@ -191,7 +191,7 @@ fn parseResponse(allocator: *Allocator, text: []u8, errorDetails: *GeminiErrorDe
 
     return GeminiResponse {
         .alloc = allocator,
-        .content = text[std.math.min(text.len, headerEnd)..],
+        .content = text[std.math.min(text.len, headerEnd+2)..],
         .original = text,
         .statusCode = statusCode,
         .meta = meta
@@ -207,10 +207,9 @@ fn syncTcpConnect(address: Address) !std.fs.File {
 }
 
 pub fn request(allocator: *Allocator, address: Address, url: Url, errorDetails: *GeminiErrorDetails) !GeminiResponse {
-    // TODO: move to Zig's new net I/O
-    var file = try syncTcpConnect(address);
+    var stream = try std.net.tcpConnectToAddress(address);
 
-    const conn = try SSLConnection.init(allocator, file, url.host, true);
+    const conn = try SSLConnection.init(allocator, stream, url.host, true);
     defer conn.deinit();
     const reader = conn.reader();
     const writer = conn.writer();
@@ -226,8 +225,7 @@ pub fn request(allocator: *Allocator, address: Address, url: Url, errorDetails: 
     var len: usize = 0;
 
     while (true) {
-        var frame = async reader.read(&bytes);
-        read = try await frame;
+        read = try reader.read(&bytes);
         var start = len;
         len += read;
         result = try allocator.realloc(result, len);

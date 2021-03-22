@@ -76,6 +76,11 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                         .elementType = "text",
                         .data = .{
                             .text = try allocator.dupeZ(u8, text[pos..end])
+                        },
+                        .style = .{
+                            .margin = .{
+                                .x = .{ .Pixels = 40 }
+                            }
                         }
                     };
                     try document.tags.append(tag);
@@ -110,7 +115,10 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                     .href = href,
                     .elementType = "link",
                     .style = .{
-                        .textColor = .{.red = 0x00, .green = 0x00, .blue = 0xFF}
+                        .textColor = .{.red = 0x00, .green = 0x00, .blue = 0xFF},
+                        .margin = .{
+                            .x = .{ .Pixels = 40 }
+                        }
                     },
                     .data = .{
                         .text = try allocator.dupeZ(u8, name)
@@ -135,7 +143,10 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                         .elementType = "h",
                         .style = .{
                             .fontSize = 42.0 * (1 - @log10(@intToFloat(f32, level+1))),
-                            .lineHeight = 1.0
+                            .lineHeight = 1.0,
+                            .margin = .{
+                                .x = .{ .Pixels = 10*@intToFloat(f64, level) }
+                            }
                         },
                         .data = .{
                             .text = try allocator.dupeZ(u8, text[pos..end])

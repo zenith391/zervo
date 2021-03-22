@@ -11,7 +11,6 @@ pub const MimeType = struct {
         if (std.mem.indexOfScalar(u8, text, '/')) |separator| {
             const mimeType = try std.ascii.allocLowerString(allocator, text[0..separator]);
             const firstParam = std.mem.indexOfScalar(u8, text, ';') orelse text.len;
-            std.log.info("{s}", .{text});
             const subtype = try std.ascii.allocLowerString(allocator, text[separator+1..firstParam]);
             var parameters = std.StringHashMap([]const u8).init(allocator);
 
