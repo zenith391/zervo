@@ -354,7 +354,7 @@ pub const CairoBackend = struct {
     }
 
     pub fn setTextWrap(self: *CairoBackend, width: ?f64) void {
-        c.pango_layout_set_width(self.textLayout, if (width) |w| @floatToInt(c_int, @floor(w*c.PANGO_SCALE)) else -1);
+        c.pango_layout_set_width(self.textLayout, if (width) |w| @floatToInt(c_int, @floor(w * @as(f64, c.PANGO_SCALE))) else -1);
     }
 
     pub fn text(self: *CairoBackend, str: [:0]const u8) void {
@@ -381,7 +381,7 @@ pub const CairoBackend = struct {
     }
 
     pub fn setFontSize(self: *CairoBackend, size: f64) void {
-        c.pango_font_description_set_size(self.currentFontDesc, @floatToInt(c_int, @floor(size * c.PANGO_SCALE)));
+        c.pango_font_description_set_size(self.currentFontDesc, @floatToInt(c_int, @floor(size * @as(f64, c.PANGO_SCALE))));
         c.pango_layout_set_font_description(self.textLayout, self.currentFontDesc);
         self.currentFont = c.pango_context_load_font(self.textContext, self.currentFontDesc);
     }
