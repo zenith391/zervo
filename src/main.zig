@@ -196,6 +196,12 @@ fn keyPressed(backend: *GraphicsBackend, key: u32, mods: u32) void {
             openPage(&renderCtx, url) catch unreachable;
             backend.frame_requested = true;
         }
+    } else {
+        if (key == GraphicsBackend.UpKey) {
+            RenderContext.scrollPage(backend, true);
+        } else if (key == GraphicsBackend.DownKey) {
+            RenderContext.scrollPage(backend, false);
+        }
     }
 }
 

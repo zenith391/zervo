@@ -63,6 +63,8 @@ pub const CairoBackend = struct {
 
     pub const BackspaceKey = c.GLFW_KEY_BACKSPACE;
     pub const EnterKey = c.GLFW_KEY_ENTER;
+    pub const UpKey = c.GLFW_KEY_UP;
+    pub const DownKey = c.GLFW_KEY_DOWN;
 
     pub const MouseButton = enum(c_int) {
         Left = c.GLFW_MOUSE_BUTTON_LEFT,
