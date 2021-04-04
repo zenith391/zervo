@@ -139,6 +139,17 @@ pub fn RenderContext(comptime T: type) type {
             backend.frame_requested = true;
         }
 
+        pub fn scrollPage(backend: *T, up: bool) void {
+            const self = @intToPtr(*Self, backend.userData);
+            if (up) {
+                self.offsetYTarget += 25.0;
+            } else {
+                self.offsetYTarget -= 25.0;
+            }
+            if (self.offsetYTarget > 0) self.offsetYTarget = 0;
+            backend.frame_requested = true;
+        }
+
         pub fn mouseButtonCallback(backend: *T, button: T.MouseButton, pressed: bool) void {
             const self = @intToPtr(*Self, backend.userData);
             const event = Event {
