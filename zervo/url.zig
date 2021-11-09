@@ -29,7 +29,7 @@ pub const Url = struct {
         }
         var port: ?u16 = null;
         if (portPos) |pos| {
-            port = std.fmt.parseUnsigned(u16, text[pos+1..pathPos], 10) catch |err| return UrlError.InvalidPort;
+            port = std.fmt.parseUnsigned(u16, text[pos+1..pathPos], 10) catch return UrlError.InvalidPort;
         }
         const host = text[schemePos+3..(portPos orelse pathPos)];
         var path = text[pathPos..];
@@ -113,6 +113,9 @@ pub const Url = struct {
     }
 
     pub fn format(self: *const Url, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        
         try writer.print("{s}://{s}", .{self.scheme, self.host});
         if (self.port) |port| {
             try writer.print(":{}", .{port});

@@ -38,6 +38,9 @@ pub const MimeType = struct {
     }
 
     pub fn format(self: *const MimeType, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        
         try writer.print("{s}/{s}", .{self.type, self.subtype});
     }
 };

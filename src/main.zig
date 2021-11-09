@@ -1,7 +1,6 @@
 const zervo = @import("zervo");
 const std = @import("std");
 const ssl = @import("ssl");
-const GraphicsBackend = @import("cairo.zig").CairoBackend;
 const RenderContext = zervo.renderer.RenderContext(GraphicsBackend);
 const imr = zervo.markups.imr;
 const os = std.os;
@@ -9,7 +8,8 @@ const net = std.net;
 const warn = std.debug.warn;
 const Allocator = std.mem.Allocator;
 
-//pub const io_mode = .evented;
+const zgt = @import("zgt.zig");
+const GraphicsBackend = zgt.GraphicsBackend;
 
 const DISABLE_IPV6 = false;
 
@@ -33,38 +33,17 @@ const LoadErrorDetails = union(enum) {
     Input: []const u8
 };
 
-fn loadHttp(addr: net.Address, url: zervo.Url) !imr.Document {
-    var headers = zervo.protocols.http.HeaderMap.init(allocator);
-    try headers.put("Connection", .{
-        .value = "close"
-    });
-    try headers.put("User-Agent", .{
-        .value = "Mozilla/5.0 (X11; Linux x86_64; rv:1.0) Gecko/20100101 TestAmabob/1.0"
-    });
-    defer headers.deinit();
-
-    var response = try zervo.protocols.http.request(allocator, addr, .{
-        .host = url.host,
-        .path = url.path,
-        .headers = headers,
-        .secure = true
-    });
-    defer response.deinit();
-
-    const doc = try zervo.markups.html.parse_imr(allocator, response.content);
-    return doc;
-}
-
 fn loadGemini(addr: net.Address, url: zervo.Url, loadErrorDetails: *LoadErrorDetails) !LoadResult {
+    _ = loadErrorDetails;
     var errorDetails: zervo.protocols.gemini.GeminiErrorDetails = undefined;
     var response = zervo.protocols.gemini.request(allocator, addr, url, &errorDetails) catch |err| switch (err) {
         error.KnownError, error.InputRequired => {
             errorDetails.deinit();
             switch (errorDetails) {
-                .Input => |input| {
+                .Input => {
                     return error.InputRequired;
                 },
-                .PermanentFailure => |failure| {
+                .PermanentFailure => {
                     return error.NotFound;
                 },
                 else => unreachable
@@ -80,6 +59,41 @@ fn loadGemini(addr: net.Address, url: zervo.Url, loadErrorDetails: *LoadErrorDet
     }
 
     const mime = response.meta;
+    if (try zervo.markups.from_mime(allocator, url, mime, response.content)) |doc| {
+        return LoadResult {
+            .Document = doc
+        };
+    } else {
+        return LoadResult {
+            .Download = try allocator.dupe(u8, response.content)
+        };
+    }
+}
+
+fn loadHttps(addr: net.Address, url: zervo.Url, loadErrorDetails: *LoadErrorDetails) !LoadResult {
+    _ = loadErrorDetails;
+    var headers = zervo.protocols.http.HeaderMap.init(allocator);
+    defer headers.deinit();
+    try headers.put("Connection", "close");
+
+    const rst = zervo.protocols.http.HttpRequest {
+        .headers = headers,
+        .secure = true,
+        .host = url.host,
+        .path = url.path
+    };
+    var response = zervo.protocols.http.request(allocator, addr, rst) catch |err| switch (err) {
+        else => return err
+    };
+    defer response.deinit();
+
+    // if (response.statusCode != 20 and false) {
+    //     std.log.err("Request error:\nStatus code: {} {s}", .{response.statusCode, response.meta});
+    //     return zervo.protocols.gemini.GeminiError.InvalidStatus;
+    // }
+
+    const mime = response.headers.get("Content-Type") orelse "text/html";
+    std.log.info("mime: {s}", .{ mime });
     if (try zervo.markups.from_mime(allocator, url, mime, response.content)) |doc| {
         return LoadResult {
             .Document = doc
@@ -114,6 +128,10 @@ fn loadPage(url: zervo.Url) !LoadResult {
         var details: LoadErrorDetails = undefined;
         const doc = try loadGemini(addr, url, &details);
         return doc;
+    } else if (std.mem.eql(u8, url.scheme, "https")) {
+        var details: LoadErrorDetails = undefined;
+        const doc = try loadHttps(addr, url, &details);
+        return doc;
     } else {
         std.log.err("No handler for URL scheme {s}", .{url.scheme});
         return error.UnhandledUrlScheme;
@@ -126,7 +144,7 @@ fn loadPageChecked(url: zervo.Url) ?LoadResult {
         const path = std.mem.concat(allocator, u8, &[_][]const u8 {"res/errors/", name, ".gmi"}) catch unreachable;
         defer allocator.free(path);
 
-        const file = std.fs.cwd().openFile(path, .{}) catch |e| {
+        const file = std.fs.cwd().openFile(path, .{}) catch {
             std.log.err("Missing error page for error {s}", .{@errorName(err)});
             if (@errorReturnTrace()) |trace| {
                 std.debug.dumpStackTrace(trace.*);
@@ -154,7 +172,7 @@ fn openPage(ctx: *RenderContext, url: zervo.Url) !void {
                 addressBar = try std.fmt.allocPrintZ(allocator, "{}", .{currentUrl});
                 if (!firstLoad) ctx.document.deinit();
                 ctx.document = doc;
-                ctx.layout();
+                ctx.layout_requested = true;
                 ctx.offsetY = 0;
                 ctx.offsetYTarget = 0;
                 firstLoad = false;
@@ -163,7 +181,10 @@ fn openPage(ctx: *RenderContext, url: zervo.Url) !void {
                 defer allocator.free(content);
 
                 const lastSlash = std.mem.lastIndexOfScalar(u8, url.path, '/').?;
-                const name = url.path[lastSlash+1..];
+                var name = url.path[lastSlash+1..];
+                if (std.mem.eql(u8, name, "")) {
+                    name = "index";
+                }
                 const file = try std.fs.cwd().createFile(name, .{});
                 try file.writeAll(content);
                 file.close();
@@ -177,128 +198,82 @@ fn openPage(ctx: *RenderContext, url: zervo.Url) !void {
     }
 }
 
-fn keyPressed(backend: *GraphicsBackend, key: u32, mods: u32) void {
-    if (addressBarFocused) {
-        if (key == GraphicsBackend.BackspaceKey) {
-            if (addressBar.len > 0) {
-                const len = addressBar.len;
-                addressBar[len-1] = 0;
-                addressBar = allocator.shrink(addressBar, len)[0..len-1 :0];
-                backend.frame_requested = true;
-            }
-        } else if (key == GraphicsBackend.EnterKey) {
-            const url = zervo.Url.parse(addressBar) catch |err| switch (err) {
-                else => {
-                    std.log.warn("invalid url", .{});
-                    return;
-                }
-            };
-            openPage(&renderCtx, url) catch unreachable;
-            backend.frame_requested = true;
-        }
+fn windowResize(_: *GraphicsBackend, _: f64, _: f64) void {
+    renderCtx.layout_requested = true;
+}
+
+var backend: GraphicsBackend = GraphicsBackend { .ctx = undefined };
+var setupped: bool = false;
+
+pub fn draw(widget: *zgt.Canvas_Impl, ctx: zgt.DrawContext) !void {
+    backend.ctx = ctx;
+    const width = @intToFloat(f64, widget.getWidth());
+    const height = @intToFloat(f64, widget.getHeight());
+    if (backend.width != width or backend.height != height) {
+        renderCtx.layout_requested = true;
     }
-}
-
-fn keyTyped(backend: *GraphicsBackend, codepoint: u21) void {
-    if (addressBarFocused) {
-        var codepointOut: [4]u8 = undefined;
-        const codepointLength = std.unicode.utf8Encode(codepoint, &codepointOut) catch unreachable;
-        const utf8 = codepointOut[0..codepointLength];
-        const new = std.mem.concat(allocator, u8, &[_][]const u8 {addressBar, utf8}) catch unreachable;
-        const newZ = allocator.dupeZ(u8, new) catch unreachable;
-        defer allocator.free(new);
-        allocator.free(addressBar);
-        addressBar = newZ;
-        backend.frame_requested = true;
+    backend.width = width;
+    backend.height = height;
+    backend.clear();
+    renderCtx.graphics = &backend;
+    if (!setupped) {
+        renderCtx.setup();
+        setupped = true;
     }
+    renderCtx.render();
 }
 
-fn mouseButton(backend: *GraphicsBackend, button: GraphicsBackend.MouseButton, pressed: bool) void {
-    const cx = backend.getCursorX();
-    const cy = backend.getCursorY();
-
-    if (cx > 80 and cy > 10 and cx < backend.getWidth() - 10 and cy < 10 + 30) {
-        addressBarFocused = true;
-    } else {
-        addressBarFocused = false;
-    }
-
-    RenderContext.mouseButtonCallback(backend, button, pressed);
+pub fn mouseButton(_: *zgt.Canvas_Impl, button: zgt.MouseButton, pressed: bool, x: u32, y: u32) !void {
+    _ = button;
+    backend.cursorX = @intToFloat(f64, x);
+    backend.cursorY = @intToFloat(f64, y);
+    RenderContext.mouseButtonCallback(&backend, .Left, pressed);
 }
 
-fn windowResize(backend: *GraphicsBackend, width: f64, height: f64) void {
-    renderCtx.layout();
+pub fn mouseScroll(_: *zgt.Canvas_Impl, _: f32, dy: f32) !void {
+    RenderContext.mouseScrollCallback(&backend, -dy);
 }
 
-// Main function
 pub fn main() !void {
+    try zgt.backend.init();
     defer _ = gpa.deinit();
 
-    // Initialize OpenSSL.
+    var window = try zgt.Window.init();
     try ssl.init();
     defer ssl.deinit();
 
-    // Example URLs:
-    //  gemini://gemini.circumlunar.space/
-    //  gemini://drewdevault.com/
-    //  gemini://skyjake.fi/lagrange/
     const url = try zervo.Url.parse("gemini://gemini.circumlunar.space/");
+    //const url = try zervo.Url.parse("https://bellard.org/quickjs/");
 
-    var backend = try GraphicsBackend.init();
-    renderCtx = RenderContext { .graphics = &backend, .document = undefined, .linkCallback = openPage, .allocator = allocator };
-
-    renderCtx.setup();
-    renderCtx.y = 50;
-
+    renderCtx = RenderContext { .graphics = undefined, .document = undefined, .linkCallback = openPage, .allocator = allocator };
     try openPage(&renderCtx, url);
     defer renderCtx.document.deinit();
-    defer allocator.free(addressBar);
     defer currentUrl.?.deinit();
 
-    backend.keyTypedCb = keyTyped;
-    backend.keyPressedCb = keyPressed;
-    backend.mouseButtonCb = mouseButton;
-    backend.windowResizeCb = windowResize;
+    var view = zgt.ZervoView();
+    _ = try view.addDrawHandler(draw);
+    try view.addMouseButtonHandler(mouseButton);
+    try view.addScrollHandler(mouseScroll);
+    try window.set(
+        zgt.Column(.{}, .{
+            zgt.Row(.{}, .{
+                zgt.TextField(.{ .text = "gemini://gemini.circumlunar.space/" })
+            }),
+            zgt.Expanded(&view)
+        })
+    );
 
-    while (true) {
+    window.resize(800, 600);
+    window.show();
+    while (zgt.stepEventLoop(.Asynchronous)) {
+        if (backend.request_next_frame) {
+            backend.frame_requested = true;
+            backend.request_next_frame = false;
+        }
+        
         if (backend.frame_requested) {
-            const g = &backend;
-            g.clear();
-            renderCtx.render();
-
-            g.moveTo(0, 0);
-            g.setSourceRGB(0.5, 0.5, 0.5);
-            g.rectangle(0, 0, g.getWidth(), 50);
-            g.fill();
-            g.setSourceRGB(0.1, 0.1, 0.1);
-            g.rectangle(80, 10, g.getWidth() - 90, 30);
-            g.fill();
-
-            if (currentUrl) |u| {
-                g.moveTo(90, 14);
-                g.setFontFace("Nunito");
-                g.setFontSize(10);
-                g.setTextWrap(null);
-                g.setSourceRGB(1, 1, 1);
-                g.text(addressBar);
-                g.stroke();
-            }
-        }
-
-        const g = &backend;
-        const cx = g.getCursorX();
-        const cy = g.getCursorY();
-
-        if (cx > 80 and cy > 10 and cx < g.getWidth() - 10 and cy < 10 + 30) {
-            g.setCursor(.Text);
-        } else {
-            g.setCursor(.Normal);
-        }
-
-        if (!backend.update()) {
-            break;
+            try view.requestDraw();
+            backend.frame_requested = false;
         }
     }
-
-    backend.deinit();
 }

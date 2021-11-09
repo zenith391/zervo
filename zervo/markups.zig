@@ -12,6 +12,8 @@ pub fn from_mime(allocator: *Allocator, root: @import("url.zig").Url, mimeRaw: [
     if (std.mem.eql(u8, mime.type, "text")) {
         if (std.mem.eql(u8, mime.subtype, "gemini")) {
             return try gemini.parse(allocator, root, text);
+        } else if (std.mem.eql(u8, mime.subtype, "html")) {
+            return try html.parse_imr(allocator, text);
         } else {
             return null;
         }

@@ -3,19 +3,16 @@ const ssl = @import("ssl");
 const SSLConnection = ssl.SSLConnection;
 const Address = std.net.Address;
 const Allocator = std.mem.Allocator;
-pub const HeaderMap = std.StringHashMap(Header);
-
-pub const Header = struct {
-    value: []const u8
-};
+pub const HeaderMap = std.StringHashMap([]const u8);
 
 pub const HttpResponse = struct {
     headers: HeaderMap,
     content: []const u8,
+    all: []const u8,
     alloc: *Allocator,
 
     pub fn deinit(self: *HttpResponse) void {
-        self.alloc.free(self.content);
+        self.alloc.free(self.all);
         self.headers.deinit();
     }
 };
@@ -55,9 +52,7 @@ fn parseResponse(allocator: *Allocator, text: []u8) !HttpResponse {
                 }
                 if (parsing == 2) {
                     const lower = try std.ascii.allocLowerString(allocator, text[keyStart..keyEnd]);
-                    try map.put(lower, .{
-                        .value = text[valueStart..valueEnd]
-                    });
+                    try map.put(lower, text[valueStart..valueEnd]);
                     keyStart = 0;
                     valueStart = 0;
                     parsing = 1;
@@ -88,7 +83,8 @@ fn parseResponse(allocator: *Allocator, text: []u8) !HttpResponse {
     var resp: HttpResponse = .{
         .headers = map,
         .alloc = allocator,
-        .content = text[pos..]
+        .content = text[pos..],
+        .all = text
     };
 
     return resp;
@@ -111,13 +107,14 @@ pub fn request(allocator: *Allocator, address: Address, rst: HttpRequest) !HttpR
 
     var it = rst.headers.iterator();
     while (it.next()) |entry| {
-        try writer.writeAll(entry.key);
+        try writer.writeAll(entry.key_ptr.*);
         try writer.writeAll(": ");
-        try writer.writeAll(entry.value.value);
+        try writer.writeAll(entry.value_ptr.*);
         try writer.writeAll("\r\n");
-        std.debug.warn("{s}: {s}\n", .{entry.key, entry.value.value});
+        std.debug.warn("{s}: {s}\n", .{entry.key_ptr.*, entry.value_ptr.*});
     }
     try writer.writeAll("\r\n");
+    std.log.info("sent", .{});
 
     var result: []u8 = try allocator.alloc(u8, 0);
     var bytes: []u8 = try allocator.alloc(u8, 4096);
@@ -131,10 +128,12 @@ pub fn request(allocator: *Allocator, address: Address, rst: HttpRequest) !HttpR
         len += read;
         result = try allocator.realloc(result, len);
         @memcpy(result[start..].ptr, slice.ptr, read);
+        std.log.info("{d}", .{read});
         if (read == 0) {
             break;
         }
     }
+    std.log.info("sent", .{});
 
     return parseResponse(allocator, result);
 }

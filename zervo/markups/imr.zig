@@ -33,7 +33,7 @@ pub const SizeUnit = union(enum) {
     pub fn get(self: *const SizeUnit, vw: Real, vh: Real) ?Real {
         return switch (self.*) {
             .Pixels => |pixels| pixels,
-            .Percent => |percent| unreachable, // TODO
+            .Percent => unreachable, // TODO
             .ViewportWidth => |vW| vw*vW,
             .ViewportHeight => |vH| vh*vH,
             .Automatic => null

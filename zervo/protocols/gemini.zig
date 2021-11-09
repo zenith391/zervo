@@ -120,7 +120,7 @@ fn parseResponse(allocator: *Allocator, text: []const u8, errorDetails: *GeminiE
     };
     const header = text[0..headerEnd];
 
-    var splitIterator = std.mem.split(header, " ");
+    var splitIterator = std.mem.split(u8, header, " ");
     const status = splitIterator.next() orelse return GeminiError.MissingStatus;
     if (status.len != 2) {
         std.log.scoped(.gemini).err("Status code ({s}) has an invalid length: {} != 2", .{status, status.len});

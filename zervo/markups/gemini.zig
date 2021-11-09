@@ -5,7 +5,7 @@ const std = @import("std");
 const imr = @import("imr.zig");
 const Allocator = std.mem.Allocator;
 const eqlIgnoreCase = std.ascii.eqlIgnoreCase;
-usingnamespace @import("../url.zig");
+const Url = @import("../url.zig").Url;
 
 const LineType = enum {
     text,
@@ -98,11 +98,11 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                 const url = text[pos..urlEnd];
                 const href = root.combine(allocator, url) catch |err| blk: {
                     switch (err) {
-                        UrlError.TooLong => {
+                        error.TooLong => {
                             std.log.warn("URL too long: {s}", .{url});
                             break :blk root.dupe(allocator) catch |e| return e;
                         },
-                        UrlError.EmptyString => {
+                        error.EmptyString => {
                             break :blk root.dupe(allocator) catch |e| return e;
                         },
                         else => return err
@@ -135,8 +135,6 @@ pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
                 } else {
                     const end = getLineEnd(text, pos);
                     while (text[pos] == ' ' or text[pos] == '\t') { pos += 1; }
-
-                    var buf: [2]u8 = undefined;
 
                     const tag = imr.Tag {
                         .allocator = allocator,

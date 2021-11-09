@@ -28,12 +28,13 @@ pub fn RenderContext(comptime T: type) type {
         x: f64 = 0,
         y: f64 = 0,
         linkCallback: ?fn(ctx: *Self, url: Url) callconv(CallbackCallConv) anyerror!void = null,
+        layout_requested: bool = false,
 
         pub const CallbackCallConv: std.builtin.CallingConvention = if (std.io.is_async) .Async else .Unspecified;
         const Self = @This();
 
         pub fn setup(self: *const Self) void {
-            self.graphics.mouseScrollCb = Self.mouseScrollCallback;
+            //self.graphics.mouseScrollCb = Self.mouseScrollCallback;
             self.graphics.userData = @ptrToInt(self);
         }
 
@@ -79,6 +80,11 @@ pub fn RenderContext(comptime T: type) type {
         }
 
         pub fn render(self: *Self) void {
+            if (self.layout_requested) {
+                self.layout();
+                self.layout_requested = false;
+            }
+
             self.width = self.graphics.getWidth();
             self.height = self.graphics.getHeight();
 
@@ -89,7 +95,7 @@ pub fn RenderContext(comptime T: type) type {
             }
 
             for (self.document.tags.items) |tag| {
-                if (self.renderTag(tag) catch unreachable) break;
+                if (self.renderTag(tag)) break;
             }
         }
 
@@ -97,10 +103,10 @@ pub fn RenderContext(comptime T: type) type {
             const g = self.graphics;
             g.moveTo(tag.layoutX, tag.layoutY + self.offsetY + self.y);
             g.text(text);
-            g.stroke();
+            g.fill();
         }
 
-        fn renderTag(self: *const Self, tag: Tag) anyerror!bool {
+        fn renderTag(self: *const Self, tag: Tag) bool {
             const style = tag.style;
             const g = self.graphics;
             switch (tag.data) {
@@ -124,14 +130,14 @@ pub fn RenderContext(comptime T: type) type {
                 },
                 .container => |childrens| {
                     for (childrens.items) |child| {
-                        if (try self.renderTag(child)) return true;
+                        if (self.renderTag(child)) return true;
                     }
                 }
             }
             return false;
         }
 
-        fn mouseScrollCallback(backend: *T, yOffset: f64) void {
+        pub fn mouseScrollCallback(backend: *T, yOffset: f64) void {
             const self = @intToPtr(*Self, backend.userData);
 
             self.offsetYTarget += yOffset * 35.0;
@@ -140,6 +146,8 @@ pub fn RenderContext(comptime T: type) type {
         }
 
         pub fn mouseButtonCallback(backend: *T, button: T.MouseButton, pressed: bool) void {
+            _ = button;
+            
             const self = @intToPtr(*Self, backend.userData);
             const event = Event {
                 .MouseButton = .{

@@ -100,7 +100,7 @@ pub const SSLConnection = struct {
                     if (result < 0) {
                         const err = c.SSL_get_error(ssl, result);
                         if (err == c.SSL_ERROR_WANT_READ) {
-                            var pollfds = [1]std.os.pollfd { .{ .fd=stream.handle, .events=std.os.POLLIN, .revents=0 } };
+                            var pollfds = [1]std.os.pollfd { .{ .fd=stream.handle, .events=std.os.POLL.IN, .revents=0 } };
                             _ = try std.os.poll(&pollfds, 1000);
                             continue :accept;
                         }
@@ -142,7 +142,7 @@ pub const SSLConnection = struct {
             if (err == c.SSL_ERROR_ZERO_RETURN or err == c.SSL_ERROR_SYSCALL) { // connection closed
                 return 0;
             } else if (err == c.SSL_ERROR_WANT_READ or err == c.SSL_ERROR_WANT_WRITE) {
-                var pollfds = [1]std.os.pollfd { .{ .fd=self.stream.?.handle, .events=std.os.POLLIN, .revents=0 } };
+                var pollfds = [1]std.os.pollfd { .{ .fd=self.stream.?.handle, .events=std.os.POLL.IN, .revents=0 } };
                 _ = try std.os.poll(&pollfds, 1000);
                 return try self.read(data);
             }
@@ -158,7 +158,7 @@ pub const SSLConnection = struct {
         if (result == 0) {
             const err = c.SSL_get_error(self.ssl, result);
             if (err == c.SSL_ERROR_WANT_READ or err == c.SSL_ERROR_WANT_WRITE) {
-                var pollfds = [1]std.os.pollfd { .{ .fd=self.stream.?.handle, .events=std.os.POLLIN, .revents=0 } };
+                var pollfds = [1]std.os.pollfd { .{ .fd=self.stream.?.handle, .events=std.os.POLL.IN, .revents=0 } };
                 _ = try std.os.poll(&pollfds, 1000);
                 return try self.write(data);
             }
