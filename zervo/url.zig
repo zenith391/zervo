@@ -14,7 +14,7 @@ pub const Url = struct {
     port: ?u16,
     path: []const u8,
     query: ?[]const u8,
-    allocator: ?*Allocator = null,
+    allocator: ?Allocator = null,
 
     const MAX_LENGTH = 1024;
 
@@ -43,7 +43,7 @@ pub const Url = struct {
         };
     }
 
-    pub fn combine(self: *const Url, allocator: *Allocator, part: []const u8) !Url {
+    pub fn combine(self: *const Url, allocator: Allocator, part: []const u8) !Url {
         if (part.len == 0) return UrlError.EmptyString;
         if (part.len >= 2 and part[0] == '/' and part[1] != '/') {
             return Url {
@@ -93,13 +93,13 @@ pub const Url = struct {
         }
     }
 
-    pub fn dupe(self: *const Url, allocator: *Allocator) !Url {
+    pub fn dupe(self: *const Url, allocator: Allocator) !Url {
         return Url {
             .scheme = try allocator.dupe(u8, self.scheme),
             .host = try allocator.dupe(u8, self.host),
             .port = self.port,
             .path = try allocator.dupe(u8, self.path),
-            .query = null, // TODO
+            .query = if (self.query) |query| try allocator.dupe(u8, query) else null,
             .allocator = allocator
         };
     }

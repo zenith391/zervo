@@ -47,7 +47,7 @@ const voidElements = [_][]const u8 {
     "param", "source", "track", "wbr"
 };
 
-fn to_imr_tag(allocator: *Allocator, tag: Tag, parent: ?*imr.Tag) anyerror!imr.Tag {
+fn to_imr_tag(allocator: Allocator, tag: Tag, parent: ?*imr.Tag) anyerror!imr.Tag {
     if (tag.text) |text| {
         std.log.info("parsed text {s}", .{text});
         return imr.Tag {
@@ -76,7 +76,7 @@ fn to_imr_tag(allocator: *Allocator, tag: Tag, parent: ?*imr.Tag) anyerror!imr.T
 
 /// Convert an HTML document to an IMR document.
 /// Memory is caller owned. The HTML document is left untouched and is not freed.
-pub fn to_imr(allocator: *Allocator, document: Document) !imr.Document {
+pub fn to_imr(allocator: Allocator, document: Document) !imr.Document {
     var result: imr.Document = .{
         .tags = imr.TagList.init(allocator)
     };
@@ -92,7 +92,7 @@ pub fn to_imr(allocator: *Allocator, document: Document) !imr.Document {
 /// Note that this method returns tags that depend on slices created from text.
 /// This means you cannot free text unless done with document.
 /// Memory is caller owned.
-pub fn parse_imr(allocator: *Allocator, text: []const u8) !imr.Document {
+pub fn parse_imr(allocator: Allocator, text: []const u8) !imr.Document {
     var html = try parse(allocator, text);
     const doc = try to_imr(allocator, html);
     html.deinit();
@@ -103,7 +103,7 @@ pub fn parse_imr(allocator: *Allocator, text: []const u8) !imr.Document {
 /// Note that this method returns tags that depend on slices created from text.
 /// This means you cannot free text unless done with document.
 /// Memory is caller owned.
-pub fn parse(allocator: *Allocator, text: []const u8) !Document {
+pub fn parse(allocator: Allocator, text: []const u8) !Document {
     var i: usize = 0;
 
     var startTag: bool = false;
@@ -146,7 +146,7 @@ pub fn parse(allocator: *Allocator, text: []const u8) !Document {
                     var tag = try allocator.create(Tag);
                     tag.name = "#text";
                     tag.text = try allocator.dupeZ(u8, text[textStart..i]);
-                    std.debug.warn("text: {s} current tag is null ? {}\n", .{tag.text.?, currentTag == null});
+                    std.debug.print("text: {s} current tag is null ? {}\n", .{tag.text.?, currentTag == null});
                     tag.parent = currentTag;
                     textStart = 0;
                     if (currentTag != null) try currentTag.?.childrens.append(tag.*);
@@ -188,7 +188,7 @@ pub fn parse(allocator: *Allocator, text: []const u8) !Document {
                 textStart = i+1;
 
                 const tagName = text[tagNameStart..tagNameEnd];
-                std.debug.warn("tag name: {s}, {}\n", .{tagName, startTag});
+                std.debug.print("tag name: {s}, {}\n", .{tagName, startTag});
                 if (startTag) {
                     startTag = false;
                     if (eqlIgnoreCase(tagName, "!DOCTYPE")) {

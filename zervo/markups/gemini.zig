@@ -49,7 +49,7 @@ fn getNextLine(text: []const u8, pos: usize) usize {
 /// Note that this method returns tags that depend on slices created from text.
 /// This means you cannot free text unless done with document.
 /// Memory is caller owned.
-pub fn parse(allocator: *Allocator, root: Url, text: []const u8) !imr.Document {
+pub fn parse(allocator: Allocator, root: Url, text: []const u8) !imr.Document {
     var document = imr.Document {
         .tags = imr.TagList.init(allocator)
     };

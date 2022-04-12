@@ -2,12 +2,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub const MimeType = struct {
-    allocator: ?*Allocator = null,
+    allocator: ?Allocator = null,
     type: []const u8,
     subtype: []const u8,
     parameters: std.StringHashMap([]const u8),
 
-    pub fn parse(allocator: *Allocator, text: []const u8) !MimeType {
+    pub fn parse(allocator: Allocator, text: []const u8) !MimeType {
         if (std.mem.indexOfScalar(u8, text, '/')) |separator| {
             const mimeType = try std.ascii.allocLowerString(allocator, text[0..separator]);
             const firstParam = std.mem.indexOfScalar(u8, text, ';') orelse text.len;

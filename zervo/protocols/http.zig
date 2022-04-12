@@ -9,7 +9,7 @@ pub const HttpResponse = struct {
     headers: HeaderMap,
     content: []const u8,
     all: []const u8,
-    alloc: *Allocator,
+    alloc: Allocator,
 
     pub fn deinit(self: *HttpResponse) void {
         self.alloc.free(self.all);
@@ -25,7 +25,7 @@ pub const HttpRequest = struct {
     secure: bool = false
 };
 
-fn parseResponse(allocator: *Allocator, text: []u8) !HttpResponse {
+fn parseResponse(allocator: Allocator, text: []u8) !HttpResponse {
     var map = HeaderMap.init(allocator);
     var pos: usize = 0;
 
@@ -90,7 +90,7 @@ fn parseResponse(allocator: *Allocator, text: []u8) !HttpResponse {
     return resp;
 }
 
-pub fn request(allocator: *Allocator, address: Address, rst: HttpRequest) !HttpResponse {
+pub fn request(allocator: Allocator, address: Address, rst: HttpRequest) !HttpResponse {
     var file = try std.net.tcpConnectToAddress(address);
 
     const conn = try SSLConnection.init(allocator, file, rst.host, rst.secure);
@@ -98,20 +98,13 @@ pub fn request(allocator: *Allocator, address: Address, rst: HttpRequest) !HttpR
     const reader = conn.reader();
     const writer = conn.writer();
 
-    try writer.writeAll("GET ");
-    try writer.writeAll(rst.path);
-    try writer.writeAll(" HTTP/1.1\r\n");
-    try writer.writeAll("Host: ");
-    try writer.writeAll(rst.host);
-    try writer.writeAll("\r\n");
+    try writer.print("GET {s} HTTP/1.1\r\n", .{ rst.path });
+    try writer.print("Host: {s}\r\n", .{ rst.host });
 
     var it = rst.headers.iterator();
     while (it.next()) |entry| {
-        try writer.writeAll(entry.key_ptr.*);
-        try writer.writeAll(": ");
-        try writer.writeAll(entry.value_ptr.*);
-        try writer.writeAll("\r\n");
-        std.debug.warn("{s}: {s}\n", .{entry.key_ptr.*, entry.value_ptr.*});
+        try writer.print("{s}: {s}\r\n", .{entry.key_ptr.*, entry.value_ptr.*});
+        std.log.debug("{s}: {s}\n", .{entry.key_ptr.*, entry.value_ptr.*});
     }
     try writer.writeAll("\r\n");
     std.log.info("sent", .{});

@@ -65,7 +65,7 @@ pub const Style = struct {
 
 pub const Tag = struct {
     parent: ?*Tag = null,
-    allocator: ?*std.mem.Allocator,
+    allocator: ?std.mem.Allocator,
     style: Style = .{},
     href: ?Url = null,
     id: ?[]const u8 = null,

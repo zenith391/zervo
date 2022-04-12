@@ -11,11 +11,11 @@ pub const GeminiResponse = struct {
 
     statusCode: u8,
     meta: []const u8,
-    alloc: *Allocator,
+    allocator: Allocator,
 
     pub fn deinit(self: *GeminiResponse) void {
-        self.alloc.free(self.original);
-        self.alloc.free(self.meta);
+        self.allocator.free(self.original);
+        self.allocator.free(self.meta);
     }
 };
 
@@ -59,31 +59,31 @@ pub const GeminiErrorDetails = union(enum) {
     Input: struct {
         sensitive: bool,
         meta: []const u8,
-        allocator: *Allocator
+        allocator: Allocator
     },
     /// 3x error
     Redirect: struct {
         temporary: bool,
         meta: []const u8,
-        allocator: *Allocator
+        allocator: Allocator
     },
     /// 4x error
     TemporaryFailure: struct {
         detail: TemporaryFailureEnum,
         meta: []const u8,
-        allocator: *Allocator
+        allocator: Allocator
     },
     /// 5x error
     PermanentFailure: struct {
         detail: PermanentFailureEnum,
         meta: []const u8,
-        allocator: *Allocator
+        allocator: Allocator
     },
     /// 6x error
     ClientCertificateRequired: struct {
         detail: ClientCertificateEnum,
         meta: []const u8,
-        allocator: *Allocator
+        allocator: Allocator
     },
 
     pub fn deinit(self: GeminiErrorDetails) void {
@@ -113,7 +113,7 @@ pub const GeminiError = error {
     InvalidStatus,
 };
 
-fn parseResponse(allocator: *Allocator, text: []const u8, errorDetails: *GeminiErrorDetails) !GeminiResponse {
+fn parseResponse(allocator: Allocator, text: []const u8, errorDetails: *GeminiErrorDetails) !GeminiResponse {
     const headerEnd = std.mem.indexOf(u8, text, "\r\n") orelse {
         std.log.scoped(.gemini).err("Missing \\r\\n in server's response", .{});
         return GeminiError.BadResponse;
@@ -134,7 +134,6 @@ fn parseResponse(allocator: *Allocator, text: []const u8, errorDetails: *GeminiE
     const meta = try allocator.dupe(u8, splitIterator.rest());
     if (meta.len > 1024) {
         std.log.scoped(.gemini).warn("Meta string is too long: {} bytes > 1024 bytes", .{meta.len});
-        //return GeminiError.MetaTooLong;
     }
 
     if (statusCode >= 10 and statusCode < 20) { // 1x (INPUT)
@@ -148,7 +147,7 @@ fn parseResponse(allocator: *Allocator, text: []const u8, errorDetails: *GeminiE
         return GeminiError.InputRequired;
     } else if (statusCode >= 30 and statusCode < 40) { // 3x (REDIRECT)
         // TODO: redirect
-        std.log.scoped(.gemini).crit("TODO status code: {}", .{statusCode});
+        std.log.scoped(.gemini).err("TODO status code: {}", .{statusCode});
         return GeminiError.KnownError;
     } else if (statusCode >= 40 and statusCode < 50) { // 4x (TEMPORARY FAILURE)
         errorDetails.* = .{
@@ -182,7 +181,7 @@ fn parseResponse(allocator: *Allocator, text: []const u8, errorDetails: *GeminiE
         return GeminiError.KnownError;
     } else if (statusCode >= 60 and statusCode < 70) { // 6x (CLIENT CERTIFICATE REQUIRED)
         // TODO: client certificate
-        std.log.scoped(.gemini).crit("TODO status code: {}", .{statusCode});
+        std.log.scoped(.gemini).err("TODO status code: {}", .{statusCode});
         return GeminiError.KnownError;
     } else if (statusCode < 20 or statusCode > 29) { // not 2x (SUCCESS)
         std.log.scoped(.gemini).err("{} is not a valid status code", .{statusCode});
@@ -190,7 +189,7 @@ fn parseResponse(allocator: *Allocator, text: []const u8, errorDetails: *GeminiE
     }
 
     return GeminiResponse {
-        .alloc = allocator,
+        .allocator = allocator,
         .content = text[std.math.min(text.len, headerEnd+2)..],
         .original = text,
         .statusCode = statusCode,
@@ -206,7 +205,7 @@ fn syncTcpConnect(address: Address) !std.fs.File {
     return std.fs.File{ .handle = sockfd };
 }
 
-pub fn request(allocator: *Allocator, address: Address, url: Url, errorDetails: *GeminiErrorDetails) !GeminiResponse {
+pub fn request(allocator: Allocator, address: Address, url: Url, errorDetails: *GeminiErrorDetails) !GeminiResponse {
     var stream = try std.net.tcpConnectToAddress(address);
 
     const conn = try SSLConnection.init(allocator, stream, url.host, true);

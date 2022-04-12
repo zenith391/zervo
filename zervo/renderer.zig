@@ -16,7 +16,7 @@ const Event = union(enum) {
 pub fn RenderContext(comptime T: type) type {
     return struct {
         /// Instance of type T.
-        allocator: *Allocator,
+        allocator: Allocator,
         graphics: *T,
         document: Document,
         width: f64 = 0,
@@ -160,7 +160,7 @@ pub fn RenderContext(comptime T: type) type {
 
             for (self.document.tags.items) |tag| {
                 const stopLoop = self.processTag(tag, &event) catch |err| {
-                    std.debug.warn("error: {}\n", .{err});
+                    std.debug.print("error: {}\n", .{err});
                     if (@errorReturnTrace()) |trace| {
                         std.debug.dumpStackTrace(trace.*);
                     }

@@ -5,7 +5,6 @@ const RenderContext = zervo.renderer.RenderContext(GraphicsBackend);
 const imr = zervo.markups.imr;
 const os = std.os;
 const net = std.net;
-const warn = std.debug.warn;
 const Allocator = std.mem.Allocator;
 
 const zgt = @import("zgt.zig");
@@ -13,8 +12,8 @@ const GraphicsBackend = zgt.GraphicsBackend;
 
 const DISABLE_IPV6 = false;
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}) {};
-const allocator = &gpa.allocator;
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
 var currentUrl: ?zervo.Url = null;
 
 var addressBar: [:0]u8 = undefined;
@@ -24,14 +23,9 @@ var renderCtx: RenderContext = undefined;
 
 var firstLoad: bool = true;
 
-const LoadResult = union(enum) {
-    Document: imr.Document,
-    Download: []const u8
-};
+const LoadResult = union(enum) { Document: imr.Document, Download: []const u8 };
 
-const LoadErrorDetails = union(enum) {
-    Input: []const u8
-};
+const LoadErrorDetails = union(enum) { Input: []const u8 };
 
 fn loadGemini(addr: net.Address, url: zervo.Url, loadErrorDetails: *LoadErrorDetails) !LoadResult {
     _ = loadErrorDetails;
@@ -46,27 +40,23 @@ fn loadGemini(addr: net.Address, url: zervo.Url, loadErrorDetails: *LoadErrorDet
                 .PermanentFailure => {
                     return error.NotFound;
                 },
-                else => unreachable
+                else => unreachable,
             }
         },
-        else => return err
+        else => return err,
     };
     defer response.deinit();
 
     if (response.statusCode != 20 and false) {
-        std.log.err("Request error:\nStatus code: {} {s}", .{response.statusCode, response.meta});
+        std.log.err("Request error:\nStatus code: {} {s}", .{ response.statusCode, response.meta });
         return zervo.protocols.gemini.GeminiError.InvalidStatus;
     }
 
     const mime = response.meta;
     if (try zervo.markups.from_mime(allocator, url, mime, response.content)) |doc| {
-        return LoadResult {
-            .Document = doc
-        };
+        return LoadResult{ .Document = doc };
     } else {
-        return LoadResult {
-            .Download = try allocator.dupe(u8, response.content)
-        };
+        return LoadResult{ .Download = try allocator.dupe(u8, response.content) };
     }
 }
 
@@ -76,37 +66,23 @@ fn loadHttps(addr: net.Address, url: zervo.Url, loadErrorDetails: *LoadErrorDeta
     defer headers.deinit();
     try headers.put("Connection", "close");
 
-    const rst = zervo.protocols.http.HttpRequest {
-        .headers = headers,
-        .secure = true,
-        .host = url.host,
-        .path = url.path
-    };
+    const rst = zervo.protocols.http.HttpRequest{ .headers = headers, .secure = true, .host = url.host, .path = url.path };
     var response = zervo.protocols.http.request(allocator, addr, rst) catch |err| switch (err) {
-        else => return err
+        else => return err,
     };
     defer response.deinit();
 
-    // if (response.statusCode != 20 and false) {
-    //     std.log.err("Request error:\nStatus code: {} {s}", .{response.statusCode, response.meta});
-    //     return zervo.protocols.gemini.GeminiError.InvalidStatus;
-    // }
-
     const mime = response.headers.get("Content-Type") orelse "text/html";
-    std.log.info("mime: {s}", .{ mime });
+    std.log.info("mime: {s}", .{mime});
     if (try zervo.markups.from_mime(allocator, url, mime, response.content)) |doc| {
-        return LoadResult {
-            .Document = doc
-        };
+        return LoadResult{ .Document = doc };
     } else {
-        return LoadResult {
-            .Download = try allocator.dupe(u8, response.content)
-        };
+        return LoadResult{ .Download = try allocator.dupe(u8, response.content) };
     }
 }
 
 fn loadPage(url: zervo.Url) !LoadResult {
-    std.log.debug("Loading web page at {} host = {s}", .{url, url.host});
+    std.log.debug("Loading web page at {} host = {s}", .{ url, url.host });
 
     var defaultPort: u16 = 80;
     if (std.mem.eql(u8, url.scheme, "gemini")) defaultPort = 1965;
@@ -122,7 +98,7 @@ fn loadPage(url: zervo.Url) !LoadResult {
             addr = list.addrs[i];
         }
     }
-    std.log.debug("Resolved address of {s}: {}", .{url.host, addr});
+    std.log.debug("Resolved address of {s}: {}", .{ url.host, addr });
 
     if (std.mem.eql(u8, url.scheme, "gemini")) {
         var details: LoadErrorDetails = undefined;
@@ -141,7 +117,7 @@ fn loadPage(url: zervo.Url) !LoadResult {
 fn loadPageChecked(url: zervo.Url) ?LoadResult {
     const doc = loadPage(url) catch |err| {
         const name = @errorName(err);
-        const path = std.mem.concat(allocator, u8, &[_][]const u8 {"res/errors/", name, ".gmi"}) catch unreachable;
+        const path = std.mem.concat(allocator, u8, &[_][]const u8{ "res/errors/", name, ".gmi" }) catch unreachable;
         defer allocator.free(path);
 
         const file = std.fs.cwd().openFile(path, .{}) catch {
@@ -154,7 +130,7 @@ fn loadPageChecked(url: zervo.Url) ?LoadResult {
 
         const full = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch unreachable;
         const errorDoc = zervo.markups.gemini.parse(allocator, url, full) catch unreachable;
-        return LoadResult { .Document = errorDoc };
+        return LoadResult{ .Document = errorDoc };
     };
     return doc;
 }
@@ -181,7 +157,7 @@ fn openPage(ctx: *RenderContext, url: zervo.Url) !void {
                 defer allocator.free(content);
 
                 const lastSlash = std.mem.lastIndexOfScalar(u8, url.path, '/').?;
-                var name = url.path[lastSlash+1..];
+                var name = url.path[lastSlash + 1 ..];
                 if (std.mem.eql(u8, name, "")) {
                     name = "index";
                 }
@@ -190,10 +166,10 @@ fn openPage(ctx: *RenderContext, url: zervo.Url) !void {
                 file.close();
                 std.log.info("Saved to {s}", .{name});
 
-                var xdg = try std.ChildProcess.init(&[_][]const u8 {"xdg-open", name}, allocator);
+                var xdg = try std.ChildProcess.init(&[_][]const u8{ "xdg-open", name }, allocator);
                 defer xdg.deinit();
                 _ = try xdg.spawnAndWait();
-            }
+            },
         }
     }
 }
@@ -202,10 +178,10 @@ fn windowResize(_: *GraphicsBackend, _: f64, _: f64) void {
     renderCtx.layout_requested = true;
 }
 
-var backend: GraphicsBackend = GraphicsBackend { .ctx = undefined };
+var backend: GraphicsBackend = GraphicsBackend{ .ctx = undefined };
 var setupped: bool = false;
 
-pub fn draw(widget: *zgt.Canvas_Impl, ctx: zgt.DrawContext) !void {
+pub fn draw(widget: *zgt.Canvas_Impl, ctx: *zgt.DrawContext) !void {
     backend.ctx = ctx;
     const width = @intToFloat(f64, widget.getWidth());
     const height = @intToFloat(f64, widget.getHeight());
@@ -245,7 +221,12 @@ pub fn main() !void {
     const url = try zervo.Url.parse("gemini://gemini.circumlunar.space/");
     //const url = try zervo.Url.parse("https://bellard.org/quickjs/");
 
-    renderCtx = RenderContext { .graphics = undefined, .document = undefined, .linkCallback = openPage, .allocator = allocator };
+    renderCtx = RenderContext{
+        .graphics = undefined,
+        .document = undefined,
+        .linkCallback = openPage,
+        .allocator = allocator,
+    };
     try openPage(&renderCtx, url);
     defer renderCtx.document.deinit();
     defer currentUrl.?.deinit();
@@ -254,14 +235,12 @@ pub fn main() !void {
     _ = try view.addDrawHandler(draw);
     try view.addMouseButtonHandler(mouseButton);
     try view.addScrollHandler(mouseScroll);
-    try window.set(
-        zgt.Column(.{}, .{
-            zgt.Row(.{}, .{
-                zgt.TextField(.{ .text = "gemini://gemini.circumlunar.space/" })
-            }),
-            zgt.Expanded(&view)
-        })
-    );
+    try window.set(zgt.Column(.{}, .{
+        zgt.Row(.{}, .{
+            zgt.TextField(.{ .text = "gemini://gemini.circumlunar.space/" }),
+        }),
+        zgt.Expanded(&view),
+    }));
 
     window.resize(800, 600);
     window.show();
@@ -270,10 +249,11 @@ pub fn main() !void {
             backend.frame_requested = true;
             backend.request_next_frame = false;
         }
-        
+
         if (backend.frame_requested) {
             try view.requestDraw();
             backend.frame_requested = false;
         }
+        std.time.sleep(16 * std.time.ns_per_ms);
     }
 }

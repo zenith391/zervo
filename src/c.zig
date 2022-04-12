@@ -9,7 +9,7 @@ usingnamespace @cImport({
 pub extern fn glGenBuffers(n: GLsizei, buffers: [*c]GLuint) void;
 pub extern fn glGenVertexArrays(n: GLsizei, arrays: [*c]GLuint) void;
 pub extern fn glBindBuffer(target: GLenum, buffer: GLuint) void;
-pub extern fn glBufferData(target: GLenum, size: GLsizeiptr, data: ?*c_void, usage: GLenum) void;
+pub extern fn glBufferData(target: GLenum, size: GLsizeiptr, data: ?*anyopaque, usage: GLenum) void;
 pub extern fn glCreateShader(shader: GLenum) GLuint;
 pub extern fn glShaderSource(shader: GLuint, count: GLsizei, string: *[:0]const GLchar, length: ?*c_int) void;
 pub extern fn glCompileShader(shader: GLuint) void;

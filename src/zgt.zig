@@ -7,19 +7,12 @@ pub fn ZervoView() zgt.Canvas_Impl {
     return canvas;
 }
 
-pub const FontMetrics = struct {
-    ascent: f64,
-    descent: f64,
-    height: f64
-};
+pub const FontMetrics = struct { ascent: f64, descent: f64, height: f64 };
 
-pub const TextMetrics = struct {
-    width: f64,
-    height: f64
-};
+pub const TextMetrics = struct { width: f64, height: f64 };
 
 pub const GraphicsBackend = struct {
-    ctx: zgt.DrawContext,
+    ctx: *zgt.DrawContext,
     layout: ?zgt.DrawContext.TextLayout = null,
     font: zgt.DrawContext.Font = .{ .face = "monospace", .size = 12.0 },
     request_next_frame: bool = false,
@@ -91,9 +84,7 @@ pub const GraphicsBackend = struct {
     }
 
     pub fn rectangle(self: *GraphicsBackend, x: f64, y: f64, width: f64, height: f64) void {
-        self.ctx.rectangle(
-            @floatToInt(u32, @floor(x)), @floatToInt(u32, @floor(y)),
-            @floatToInt(u32, @floor(width)), @floatToInt(u32, @floor(height)));
+        self.ctx.rectangle(@floatToInt(u32, @floor(x)), @floatToInt(u32, @floor(y)), @floatToInt(u32, @floor(width)), @floatToInt(u32, @floor(height)));
     }
 
     pub fn setTextWrap(self: *GraphicsBackend, width: ?f64) void {
@@ -107,8 +98,7 @@ pub const GraphicsBackend = struct {
         if (self.layout == null) {
             self.layout = zgt.DrawContext.TextLayout.init();
         }
-        self.ctx.text(@floatToInt(i32, @floor(self.x)), @floatToInt(i32, @floor(self.y)),
-            self.layout.?, str);
+        self.ctx.text(@floatToInt(i32, @floor(self.x)), @floatToInt(i32, @floor(self.y)), self.layout.?, str);
     }
 
     pub fn setFontFace(self: *GraphicsBackend, font: [:0]const u8) void {
@@ -136,10 +126,7 @@ pub const GraphicsBackend = struct {
     pub fn getTextMetrics(self: *GraphicsBackend, str: [:0]const u8) TextMetrics {
         _ = str;
         const metrics = self.layout.?.getTextSize(str);
-        return TextMetrics {
-            .width = @intToFloat(f64, metrics.width),
-            .height = @intToFloat(f64, metrics.height)
-        };
+        return TextMetrics{ .width = @intToFloat(f64, metrics.width), .height = @intToFloat(f64, metrics.height) };
     }
 
     pub fn clear(self: *GraphicsBackend) void {

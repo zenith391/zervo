@@ -27,16 +27,16 @@ fn print_errors() void {
 }
 
 fn print_ssl_error(err: c_int) void {
-    std.debug.warn("detailled error: ", .{});
+    std.debug.print("detailled error: ", .{});
 
     switch (err) {
-        c.SSL_ERROR_ZERO_RETURN => std.debug.warn("SSL_ERROR_ZERO_RETURN\n", .{}),
-        c.SSL_ERROR_SSL => std.debug.warn("SSL_ERROR_SSL\n", .{}),
-        c.SSL_ERROR_SYSCALL => std.debug.warn("SSL_ERROR_SYSCALL\n", .{}),
-        c.SSL_ERROR_WANT_READ => std.debug.warn("SSL_ERROR_WANT_READ\n", .{}),
-        c.SSL_ERROR_WANT_WRITE => std.debug.warn("SSL_ERROR_WANT_WRITE\n", .{}),
-        c.SSL_ERROR_WANT_CONNECT => std.debug.warn("SSL_ERROR_WANT_CONNECT\n", .{}),
-        c.SSL_ERROR_WANT_ACCEPT => std.debug.warn("SSL_ERROR_WANT_ACCEPT\n", .{}),
+        c.SSL_ERROR_ZERO_RETURN => std.debug.print("SSL_ERROR_ZERO_RETURN\n", .{}),
+        c.SSL_ERROR_SSL => std.debug.print("SSL_ERROR_SSL\n", .{}),
+        c.SSL_ERROR_SYSCALL => std.debug.print("SSL_ERROR_SYSCALL\n", .{}),
+        c.SSL_ERROR_WANT_READ => std.debug.print("SSL_ERROR_WANT_READ\n", .{}),
+        c.SSL_ERROR_WANT_WRITE => std.debug.print("SSL_ERROR_WANT_WRITE\n", .{}),
+        c.SSL_ERROR_WANT_CONNECT => std.debug.print("SSL_ERROR_WANT_CONNECT\n", .{}),
+        c.SSL_ERROR_WANT_ACCEPT => std.debug.print("SSL_ERROR_WANT_ACCEPT\n", .{}),
         else => unreachable
     }
 }
@@ -69,7 +69,7 @@ pub const SSLConnection = struct {
     pub const Reader = std.io.Reader(*const SSLConnection, anyerror, read);
     pub const Writer = std.io.Writer(*const SSLConnection, anyerror, write);
 
-    pub fn init(allocator: *Allocator, stream: Stream, host: []const u8, secure: bool) !SSLConnection {
+    pub fn init(allocator: Allocator, stream: Stream, host: []const u8, secure: bool) !SSLConnection {
         var ctx: *c.SSL_CTX = undefined;
         var ssl: *c.SSL = undefined;
 

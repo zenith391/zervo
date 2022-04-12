@@ -5,7 +5,7 @@ pub const gemini = @import("markups/gemini.zig");
 const std       = @import("std");
 const Allocator = std.mem.Allocator;
 
-pub fn from_mime(allocator: *Allocator, root: @import("url.zig").Url, mimeRaw: []const u8, text: []const u8) !?imr.Document {
+pub fn from_mime(allocator: Allocator, root: @import("url.zig").Url, mimeRaw: []const u8, text: []const u8) !?imr.Document {
     var mime = try @import("mime.zig").MimeType.parse(allocator, mimeRaw);
     defer mime.deinit();
 
