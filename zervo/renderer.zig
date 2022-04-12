@@ -34,7 +34,6 @@ pub fn RenderContext(comptime T: type) type {
         const Self = @This();
 
         pub fn setup(self: *const Self) void {
-            //self.graphics.mouseScrollCb = Self.mouseScrollCallback;
             self.graphics.userData = @ptrToInt(self);
         }
 

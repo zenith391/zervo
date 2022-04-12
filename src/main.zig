@@ -210,6 +210,15 @@ pub fn mouseScroll(_: *zgt.Canvas_Impl, _: f32, dy: f32) !void {
     RenderContext.mouseScrollCallback(&backend, -dy);
 }
 
+fn onGoToLink(button: *zgt.Button_Impl) !void {
+    const root = button.getRoot().?;
+    const field = root.getAs(zgt.TextField_Impl, "url-field").?;
+    std.log.info("load url {s}", .{ field.getText() });
+
+    const url = try zervo.Url.parse(field.getText());
+    try openPage(&renderCtx, url);
+}
+
 pub fn main() !void {
     try zgt.backend.init();
     defer _ = gpa.deinit();
@@ -237,7 +246,9 @@ pub fn main() !void {
     try view.addScrollHandler(mouseScroll);
     try window.set(zgt.Column(.{}, .{
         zgt.Row(.{}, .{
-            zgt.TextField(.{ .text = "gemini://gemini.circumlunar.space/" }),
+            zgt.TextField(.{ .text = "gemini://gemini.circumlunar.space/" })
+                .setName("url-field"),
+            zgt.Button(.{ .label = "Go", .onclick = onGoToLink })
         }),
         zgt.Expanded(&view),
     }));
@@ -254,6 +265,6 @@ pub fn main() !void {
             try view.requestDraw();
             backend.frame_requested = false;
         }
-        std.time.sleep(16 * std.time.ns_per_ms);
+        std.time.sleep(4 * std.time.ns_per_ms);
     }
 }
