@@ -156,7 +156,9 @@ pub fn parse(allocator: Allocator, root: Url, text: []const u8) !imr.Document {
                 }
             },
             .Preformatting => {
-                const end = std.mem.indexOfPos(u8, text, pos, "```") orelse text.len;
+                const lineEnd = getLineEnd(text, pos);
+                const end = std.mem.indexOfPos(u8, text[0..lineEnd], pos, "```") orelse lineEnd;
+                const endPreformatting = std.mem.indexOfPos(u8, text[0..lineEnd], pos, "```") != null;
                 const tag = imr.Tag {
                     .allocator = allocator,
                     .elementType = "pre",
@@ -170,7 +172,9 @@ pub fn parse(allocator: Allocator, root: Url, text: []const u8) !imr.Document {
                 };
                 try document.tags.append(tag);
                 pos = getNextLine(text, end);
-                state = .Text;
+                if (endPreformatting) {
+                    state = .Text;
+                }
             }
         }
     }

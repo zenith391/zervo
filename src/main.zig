@@ -9,6 +9,7 @@ const Allocator = std.mem.Allocator;
 
 const zgt = @import("zgt.zig");
 const GraphicsBackend = zgt.GraphicsBackend;
+var window: zgt.Window = undefined;
 
 const DISABLE_IPV6 = false;
 
@@ -16,12 +17,9 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 var currentUrl: ?zervo.Url = null;
 
-var addressBar: [:0]u8 = undefined;
-var addressBarFocused: bool = false;
-
 var renderCtx: RenderContext = undefined;
-
 var firstLoad: bool = true;
+var history = std.ArrayList(zervo.Url).init(zgt.internal.lasting_allocator);
 
 const LoadResult = union(enum) { Document: imr.Document, Download: []const u8 };
 
@@ -144,14 +142,23 @@ fn openPage(ctx: *RenderContext, url: zervo.Url) !void {
                     u.deinit();
                 }
                 currentUrl = try url.dupe(allocator);
-                if (!firstLoad) allocator.free(addressBar);
-                addressBar = try std.fmt.allocPrintZ(allocator, "{}", .{currentUrl});
                 if (!firstLoad) ctx.document.deinit();
                 ctx.document = doc;
                 ctx.layout_requested = true;
                 ctx.offsetY = 0;
                 ctx.offsetYTarget = 0;
                 firstLoad = false;
+
+                try history.append(try currentUrl.?.dupe(allocator));
+
+                if (window.getChild()) |root_widget| {
+                    const root = root_widget.as(zgt.Container_Impl);
+                    const field = root.getAs(zgt.TextField_Impl, "url-field").?;
+                    const urlString = try std.fmt.allocPrint(zgt.internal.scratch_allocator, "{}", .{ currentUrl });
+                    std.log.info("{s}", .{ currentUrl });
+                    defer zgt.internal.scratch_allocator.free(urlString);
+                    field.setText(urlString);
+                }
             },
             .Download => |content| {
                 defer allocator.free(content);
@@ -210,6 +217,17 @@ pub fn mouseScroll(_: *zgt.Canvas_Impl, _: f32, dy: f32) !void {
     RenderContext.mouseScrollCallback(&backend, -dy);
 }
 
+fn onHistoryBack(_: *zgt.Button_Impl) !void {
+    if (history.items.len > 1) {
+        _ = history.pop();
+        const url = history.pop();
+        defer url.deinit();
+
+        try openPage(&renderCtx, url);
+        std.log.info("history is now {any}", .{ history.items });
+    }
+}
+
 fn onGoToLink(button: *zgt.Button_Impl) !void {
     const root = button.getRoot().?;
     const field = root.getAs(zgt.TextField_Impl, "url-field").?;
@@ -223,7 +241,7 @@ pub fn main() !void {
     try zgt.backend.init();
     defer _ = gpa.deinit();
 
-    var window = try zgt.Window.init();
+    window = try zgt.Window.init();
     try ssl.init();
     defer ssl.deinit();
 
@@ -240,14 +258,25 @@ pub fn main() !void {
     defer renderCtx.document.deinit();
     defer currentUrl.?.deinit();
 
+    defer {
+        for (history.items) |historyUrl| {
+            historyUrl.deinit();
+        }
+        history.deinit();
+    }
+
     var view = zgt.ZervoView();
     _ = try view.addDrawHandler(draw);
     try view.addMouseButtonHandler(mouseButton);
     try view.addScrollHandler(mouseScroll);
     try window.set(zgt.Column(.{}, .{
         zgt.Row(.{}, .{
-            zgt.TextField(.{ .text = "gemini://gemini.circumlunar.space/" })
-                .setName("url-field"),
+            zgt.Button(.{ .label = "<-", .onclick = onHistoryBack }),
+            zgt.Button(.{ .label = "->" }),
+            zgt.Expanded(
+                zgt.TextField(.{ .text = "gemini://gemini.circumlunar.space/" })
+                    .setName("url-field")
+            ),
             zgt.Button(.{ .label = "Go", .onclick = onGoToLink })
         }),
         zgt.Expanded(&view),
